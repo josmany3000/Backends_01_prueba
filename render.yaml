@@ -1,0 +1,12 @@
+# render.yaml
+services:
+  - type: web
+    name: backend-ia
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false # Set to true if you want Render to manage syncing this, otherwise manage manually
+      - key: PYTHON_VERSION
+        value: 3.9.12 # Or your preferred Python version, ensure it's compatible

@@ -1,0 +1,5 @@
+Flask
+Flask-Cors
+openai
+python-dotenv
+gunicorn # Add this line for production server
