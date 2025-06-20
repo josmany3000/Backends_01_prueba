@@ -1,5 +1,6 @@
-Flask
-Flask-Cors
-openai
+flask
+flask-cors
 python-dotenv
-gunicorn # Add this line for production server
+openai
+google-cloud-storage
+requests
