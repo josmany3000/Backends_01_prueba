@@ -127,6 +127,20 @@ def process_scene_audio(scene, voice):
 
 # --- RUTAS DE LA API ---
 
+@app.route('/')
+def health_check():
+    """
+    Ruta de verificación de estado (Health Check).
+    Confirma que el servidor está en línea y funcionando.
+    """
+    # Imprime un mensaje en los logs de Render para confirmar que se está accediendo.
+    print("Health check endpoint fue accedido correctamente.")
+    return jsonify({
+        "status": "ok",
+        "message": "El backend de IA está funcionando correctamente."
+    }), 200 # Devuelve un código de estado 200 OK
+
+
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     if not openai_client:
@@ -169,23 +183,16 @@ def generate_initial_content():
             messages=[{"role": "system", "content": prompt}]
         )
         
-        # Carga el JSON directamente, mucho más robusto que parsear texto
         content = json.loads(response_gpt.choices[0].message.content)
         scenes_data = content.get('scenes', [])
 
-        # Asignar IDs únicos a cada escena
         for scene in scenes_data:
             scene['id'] = f"scene_{uuid.uuid4()}"
             scene['imageUrl'] = None
             scene['audioUrl'] = None
 
-        # --- PROCESAMIENTO EN PARALELO ---
-        # Usamos ThreadPoolExecutor para procesar todas las imágenes al mismo tiempo.
-        # Esto es crucial para no exceder los timeouts en plataformas como Render.
         with ThreadPoolExecutor(max_workers=10) as executor:
-            # Enviamos cada escena a procesar en un hilo separado
             futures = [executor.submit(process_scene_image, scene, image_size) for scene in scenes_data]
-            # Recolectamos los resultados
             processed_scenes = [future.result() for future in futures]
         
         return jsonify({"scenes": processed_scenes})
@@ -205,20 +212,16 @@ def generate_audio():
         scenes = data.get('scenes', [])
         voice = data.get('voice', 'nova')
 
-        # Filtramos las escenas que realmente necesitan audio
         scenes_to_process = [s for s in scenes if s.get('script') and not s.get('audioUrl')]
 
-        # --- PROCESAMIENTO EN PARALELO ---
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {executor.submit(process_scene_audio, scene, voice): scene for scene in scenes_to_process}
             
             processed_results = {}
             for future in futures:
-                # Obtenemos la escena procesada
                 processed_scene = future.result()
                 processed_results[processed_scene['id']] = processed_scene
 
-        # Actualizamos la lista original de escenas con los resultados procesados
         for i, scene in enumerate(scenes):
             if scene['id'] in processed_results:
                 scenes[i] = processed_results[scene['id']]
@@ -244,7 +247,6 @@ def regenerate_scene_part():
         if not all([part_to_regenerate, scene, config]):
             return jsonify({"error": "Faltan datos en la petición"}), 400
 
-        # --- REGENERAR GUION ---
         if part_to_regenerate == 'script':
             prompt = f"""
             Eres un guionista experto. Reescribe el siguiente guion para una escena de un video sobre '{config.get('tema')}' en el nicho '{config.get('nicho')}'.
@@ -262,13 +264,11 @@ def regenerate_scene_part():
             new_script = response_gpt.choices[0].message.content.strip()
             return jsonify({"newScript": new_script})
 
-        # --- REGENERAR IMAGEN (usa la función auxiliar de una sola escena) ---
         elif part_to_regenerate == 'image':
             resolucion = config.get('resolucion', '1:1')
             image_size_map = {'9:16': '1024x1792', '16:9': '1792x1024'}
             image_size = image_size_map.get(resolucion, '1024x1024')
             
-            # Para la regeneración, necesitamos un prompt de imagen. Si no lo tenemos, lo creamos.
             image_prompt = scene.get('image_prompt')
             if not image_prompt:
                  image_prompt = f"Crea una imagen visualmente impactante para un video sobre '{config.get('tema')}'. La imagen debe ilustrar esta idea: '{scene.get('script')}'. Estilo: {definir_tono_por_nicho(config.get('nicho'))}, cinematográfico, alta calidad."
@@ -277,7 +277,6 @@ def regenerate_scene_part():
             updated_scene = process_scene_image(scene, image_size)
             return jsonify({"newImageUrl": updated_scene.get('imageUrl')})
 
-        # --- REGENERAR AUDIO (usa la función auxiliar de una sola escena) ---
         elif part_to_regenerate == 'audio':
             voice = config.get('voice', 'nova')
             updated_scene = process_scene_audio(scene, voice)
