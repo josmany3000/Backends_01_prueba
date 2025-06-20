@@ -178,7 +178,7 @@ def generate_initial_content():
         Asegúrate de que la salida sea solo el objeto JSON, sin texto adicional antes o después.
         """
         response_gpt = openai_client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-3.5-turbo",
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": prompt}]
         )
