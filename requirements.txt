@@ -1,7 +1,8 @@
 flask
 flask-cors
 python-dotenv
-openai
+google-generativeai
 google-cloud-storage
+google-cloud-aiplatform
 requests
-gunicorn
+gunicorn==21.2.0

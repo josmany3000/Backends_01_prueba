@@ -1,12 +1,37 @@
-# render.yaml
 services:
   - type: web
-    name: backend-ia
+    name: backend-ia-videos
     env: python
+    region: oregon  # Puedes cambiarlo a 'frankfurt' si estás en Europa
+    plan: free      # O usa 'starter' si quieres evitar que el servicio se duerma
+    
+    # Asegúrate de que tu archivo requirements.txt esté completo
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    
+    # Comando para iniciar el servidor de producción
+    startCommand: gunicorn app:app
+
+    # Definición de las variables de entorno que necesita tu aplicación.
+    # Render creará estas variables por ti. Solo necesitas pegar los valores
+    # correctos en el panel de control de tu servicio en Render.
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false # Set to true if you want Render to manage syncing this, otherwise manage manually
-      - key: PYTHON_VERSION
-        value: 3.9.12 # Or your preferred Python version, ensure it's compatible
+      - key: GOOGLE_API_KEY
+        value: "PEGA_AQUI_TU_API_KEY_DE_GOOGLE"
+        
+      - key: GOOGLE_CLOUD_PROJECT
+        value: "PEGA_AQUI_TU_ID_DE_PROYECTO_GOOGLE_CLOUD"
+
+      - key: GCS_BUCKET_NAME
+        value: "PEGA_AQUI_TU_NOMBRE_DE_BUCKET_GCS"
+      
+      # Clave de API de ElevenLabs añadida
+      - key: ELEVENLABS_API_KEY
+        value: "PEGA_AQUI_TU_API_KEY_DE_ELEVENLABS"
+
+      # Para las credenciales JSON, la mejor práctica sigue siendo usar un "Secret File".
+      # Esta variable está aquí para recordártelo. Deberás añadir el archivo
+      # GOOGLE_APPLICATION_CREDENTIALS_JSON manualmente en la sección "Secret Files"
+      # del panel de Render y pegar el contenido de tu archivo JSON allí.
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+
