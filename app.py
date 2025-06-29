@@ -60,107 +60,17 @@ except Exception as e:
 model_text = genai.GenerativeModel('gemini-1.5-flash')
 model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
-# --- NUEVO: DICCIONARIO DE PROMPTS POR NICHO ---
-NICHE_PROMPTS = {
-    "misterio_terror": """
-    **ROL:** Eres un guionista experto en el género de misterio y terror.
-    **TAREA:** Escribe una narración de suspenso y terror sobre el siguiente tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas. Puede ser sobre una leyenda, una historia documentada o un testimonio de la vida real.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "finanzas_emprendimiento": """
-    **ROL:** Eres un coach financiero y de negocios, experto en comunicación.
-    **TAREA:** Redacta una narración inspiradora sobre el siguiente tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos. Puede ser una historia de éxito, un análisis de tendencia o un consejo práctico.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "tecnologia_ia": """
-    **ROL:** Eres un divulgador científico y experto en nuevas tecnologías.
-    **TAREA:** Genera una narración informativa y futurista sobre este tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** El estilo debe ser didáctico, emocionante y accesible para todo público. Investiga brevemente en tu base de conocimiento para asegurar que los datos sean recientes y correctos. Incluye ejemplos reales y una visión de futuro.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "documentales": """
-    **ROL:** Eres un guionista de documentales para canales como Discovery o National Geographic.
-    **TAREA:** Escribe una narración objetiva, informativa y neutral sobre el siguiente tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** El tono debe ser serio y documental, con un enfoque en hechos, fechas y análisis profundos. La información debe ser verificable y presentada de manera clara y ordenada.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "biblia_cristianismo": """
-    **ROL:** Eres un predicador y maestro de estudios bíblicos con gran capacidad para narrar.
-    **TAREA:** Redacta una narración inspiradora sobre este tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un tono respetuoso, cálido y espiritual. El contenido puede basarse en pasajes bíblicos, reflexiones cristianas o historias de fe. Transmite paz, esperanza y enseñanzas morales con un lenguaje accesible para todos.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "aliens_teorias": """
-    **ROL:** Eres un investigador y presentador de programas sobre misterios sin resolver.
-    **TAREA:** Crea una narración intrigante sobre este tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un estilo misterioso y especulativo. Puedes hablar de teorías conspirativas o casos famosos de contacto extraterrestre. Utiliza referencias a eventos, lugares o personas reales para dar contexto, pero mantén un tono de entretenimiento y misterio, sin afirmar que la teoría es 100% verídica.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "tendencias_virales": """
-    **ROL:** Eres un influencer y creador de contenido experto en tendencias de redes sociales.
-    **TAREA:** Genera una narración sobre la siguiente tendencia viral: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un tono dinámico, moderno y con lenguaje juvenil. El ritmo debe ser divertido, acelerado y llamativo. Puedes incluir hashtags, expresiones virales y el contexto relevante de la tendencia para que todos la entiendan.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "politica": """
-    **ROL:** Eres un analista político y periodista de investigación.
-    **TAREA:** Redacta una narración seria y crítica sobre el siguiente tema político: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un tono imparcial pero analítico. Cita hechos, posibles estadísticas y consecuencias. Asegúrate de explicar el contexto de manera clara y con profundidad, sin caer en lenguaje excesivamente técnico. El objetivo es informar, no persuadir.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """,
-    "anime_manga": """
-    **ROL:** Eres un fan y crítico experto en la cultura del anime y el manga.
-    **TAREA:** Crea una narración apasionada sobre este tema: "{guion_personalizado}".
-    **INSTRUCCIONES DE ESTILO:** Usa un tono épico, emocional y juvenil. La narración puede ser sobre un anime/manga popular o una historia original inspirada en ese estilo. Incluye referencias al estilo narrativo japonés, con momentos de dramatismo, reflexión y acción.
-    **REGLAS TÉCNICAS OBLIGATORIAS:**
-    1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-    2.  **ESTRUCTURA:** Genera **EXACTAMENTE {numero_de_escenas} escenas**.
-    3.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
-    4.  **GUION LIMPIO:** El texto de cada escena debe ser solo la narración. **NO INCLUYAS encabezados (ej. 'ESCENA 1'), nombres de personajes, o cualquier otra etiqueta.**
-    5.  **FORMATO DE SALIDA (CRÍTICO):** La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto en el array debe tener las claves "id" y "script".
-    """
+# --- NUEVO: DICCIONARIO CENTRAL DE PROMPTS POR NICHO ---
+PROMPTS_POR_NICHO = {
+    "misterio_terror": "Escribe una narración de suspenso y terror sobre un evento inexplicable ya sea una leyenda, una Historia documentada o un testimonio de vida real. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
+    "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
+    "tecnologia_ia": "Genera una narración informativa y futurista sobre un avance reciente en inteligencia artificial o tecnología disruptiva. Investiga en sitios oficiales. El estilo debe ser didáctico, emocionante y accesible para todo público, con ejemplos reales y visión de futuro.",
+    "documentales": "Escribe una narración objetiva, informativa y neutral sobre un tema de interés social, cultural o histórico. El tono debe ser serio y documental, con un enfoque en hechos, fechas y análisis profundos. Ideal para un documental narrado.",
+    "biblia_cristianismo": "Redacta una narración inspiradora basada en pasajes bíblicos, reflexiones cristianas o historias de fe. Usa un tono respetuoso, cálido y espiritual. Transmite paz, esperanza y enseñanzas morales con lenguaje accesible.",
+    "aliens_teorias": "Crea una narración intrigante sobre una teoría conspirativa o un caso famoso de contacto extraterrestre. Usa un estilo misterioso, especulativo y con referencias reales, manteniendo el tono entretenido pero sin afirmar que es 100% verdad.",
+    "tendencias_virales": "Genera una narración dinámica, moderna y con lenguaje juvenil sobre una tendencia viral actual en redes sociales. Usa un tono divertido, acelerado y llamativo. Incluye hashtags, expresiones virales y contexto relevante.",
+    "politica": "Redacta una narración seria y crítica sobre un tema político actual. Usa un tono imparcial pero analítico, citando hechos, estadísticas y consecuencias. Asegúrate de explicar el contexto de manera clara y con profundidad.",
+    "anime_manga": "Crea una narración apasionada sobre un anime o manga popular o una historia original inspirada en ese estilo. Usa un tono épico, emocional y juvenil. Incluye referencias al estilo narrativo japonés, con dramatismo y acción."
 }
 
 # --- 2. DECORADOR DE REINTENTOS (Sin cambios) ---
@@ -251,14 +161,32 @@ def _generate_and_upload_image(scene_script, aspect_ratio):
 
 @retry_on_failure()
 def _generate_audio_with_elevenlabs(text_input, voice_id):
+    """Genera audio usando la API de ElevenLabs y lo sube a GCS."""
     logging.info(f"Llamando a la API de ElevenLabs con la voz '{voice_id}'.")
+    
     if not ELEVENLABS_API_KEY:
         raise ValueError("La API Key de ElevenLabs no está configurada.")
+
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
-    headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
-    data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
+    
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+    
+    data = {
+        "text": text_input,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.75
+        }
+    }
+    
     response = requests.post(tts_url, json=data, headers=headers)
     response.raise_for_status() 
+    
     logging.info("Respuesta de la API de ElevenLabs recibida exitosamente.")
     public_url = upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
     return public_url
@@ -303,14 +231,172 @@ def _perform_image_generation(job_id, scenes, aspect_ratio):
 # --- 5. ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v5.3 - Audio con ElevenLabs y Prompts por Nicho"
+    return "Backend de IA para Videos v6.0 - Prompts por Nicho"
 
-# --- ENDPOINT DE GENERACIÓN INICIAL TOTALMENTE MODIFICADO ---
+# --- ENDPOINT DE GENERACIÓN INICIAL (TOTALMENTE MODIFICADO) ---
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     try:
         data = request.get_json()
         logging.info(f"Recibida solicitud de trabajo para generar contenido con datos: {data}")
+        
+        # Selecciona el nicho y el prompt correspondiente. 'documentales' es el default.
+        nicho = data.get('nicho', 'documentales')
+        prompt_instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
+        
+        duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
+        numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
+        
+        palabras_totales = int(data.get('duracionVideo', 50)) * 2.5
+        palabras_por_escena = int(palabras_totales // numero_de_escenas)
 
-        # 1. Obtener datos de la solicitud con valores por defecto
-        # El nicho por defecto
+        # Construcción del prompt final para la IA
+        prompt = f"""
+        **ROL:** Eres un guionista experto y un investigador especializado en el nicho seleccionado.
+        **TAREA:** Crea un guion completo para un video corto, siguiendo estrictamente las instrucciones del nicho y las reglas de formato.
+
+        ---
+        **INSTRUCCIONES DEL NICHO SELECCIONADO ({nicho}):**
+        {prompt_instruccion_base}
+        ---
+
+        **REGLAS DE FORMATO Y ESTRUCTURA (OBLIGATORIAS):**
+        1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
+        2.  **TEMA PRINCIPAL:** "{data.get('guionPersonalizado')}"
+        3.  **ESTRUCTURA:** Genera EXACTAMENTE {numero_de_escenas} escenas.
+        4.  **LONGITUD:** Cada escena debe tener un máximo de **{palabras_por_escena} palabras**.
+        5.  **FORMATO DE TEXTO (CRÍTICO):** El guion debe ser solo texto narrativo. **NO INCLUYAS encabezados de escena (como 'EXT. DÍA'), nombres de personajes, ni ninguna etiqueta.**
+        
+        **FORMATO DE SALIDA (OBLIGATORIO):**
+        La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto debe tener "id" y "script". NO incluyas ninguna explicación, solo el JSON.
+        """
+        logging.info(f"Enviando prompt a Gemini para el nicho '{nicho}' con {numero_de_escenas} escenas.")
+        response = model_text.generate_content(prompt)
+        
+        parsed_json = safe_json_parse(response.text)
+        if not (parsed_json and 'scenes' in parsed_json and isinstance(parsed_json['scenes'], list)):
+            logging.error(f"La IA no pudo generar un guion con el formato correcto. Respuesta: {response.text}")
+            return jsonify({"error": "La IA no pudo generar un guion válido. Intenta de nuevo con un tema diferente."}), 500
+        
+        scenes = parsed_json['scenes']
+        logging.info(f"Guion generado con {len(scenes)} escenas. Creando trabajo de imágenes.")
+        
+        aspect_ratio = data.get('resolucionVideo') or data.get('resolucion', '16:9')
+        job_id = str(uuid.uuid4())
+        JOBS[job_id] = {'status': 'pending', 'progress': f'0/{len(scenes)}'}
+        
+        thread = threading.Thread(target=_perform_image_generation, args=(job_id, scenes, aspect_ratio))
+        thread.start()
+        
+        return jsonify({"jobId": job_id})
+        
+    except Exception as e:
+        logging.error("Error inesperado en generate_initial_content.", exc_info=True)
+        return jsonify({"error": f"Ocurrió un error interno al iniciar el trabajo: {e}"}), 500
+
+# Endpoint de estado del trabajo (sin cambios)
+@app.route('/api/content-job-status/<job_id>', methods=['GET'])
+def get_content_job_status(job_id):
+    job = JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Trabajo no encontrado"}), 404
+    return jsonify(job)
+
+# Endpoint para regenerar partes (sin cambios)
+@app.route('/api/regenerate-scene-part', methods=['POST'])
+def regenerate_scene_part():
+    data = request.get_json()
+    scene = data.get('scene')
+    part_to_regenerate = data.get('part')
+    config = data.get('config')
+    if not all([scene, part_to_regenerate, config]):
+        return jsonify({"error": "Faltan datos de escena, parte a regenerar o configuración"}), 400
+    if part_to_regenerate == 'script':
+        try:
+            prompt = f"""
+            Eres un guionista experto. Reescribe el siguiente texto para una escena.
+            **REGLAS ESTRICTAS:**
+            1.  Mantén la idea central del texto original.
+            2.  Sé creativo y conciso.
+            3.  **FORMATO OBLIGATORIO:** Devuelve solo el nuevo texto del guion en formato de párrafo narrativo. NO incluyas encabezados de escena (como 'EXT. DÍA'), nombres de personaje, ni ninguna otra etiqueta.
+            4.  El idioma debe ser Español Latinoamericano.
+            
+            **Texto Original:** '{scene.get('script')}'
+            """
+            response = model_text.generate_content(prompt)
+            new_script = response.text.strip().replace("`", "")
+            return jsonify({"newScript": new_script})
+        except Exception as e:
+            logging.error(f"Error al regenerar guion: {e}", exc_info=True)
+            return jsonify({"error": "Error al contactar al modelo de IA."}), 500
+    elif part_to_regenerate == 'media':
+        try:
+            aspect_ratio = config.get('resolucion') or config.get('resolucionVideo', '16:9')
+            new_image_url = _generate_and_upload_image(scene.get('script', 'una imagen abstracta'), aspect_ratio)
+            if not new_image_url:
+                return jsonify({"error": "La IA no pudo generar una nueva imagen (posiblemente por filtros)."}), 500
+            return jsonify({"newImageUrl": new_image_url, "newVideoUrl": None})
+        except Exception as e:
+            logging.error(f"Error al regenerar media: {e}", exc_info=True)
+            return jsonify({"error": f"Error al generar la nueva imagen: {str(e)}"}), 500
+    return jsonify({"error": "Parte no válida para regenerar."}), 400
+
+# Endpoint de audio (sin cambios)
+@app.route('/api/generate-full-audio', methods=['POST'])
+def generate_full_audio():
+    data = request.get_json()
+    plain_text_script = data.get('script')
+    voice_id = data.get('voice', '21m00Tcm4TlvDq8ikWAM') # Voz de ElevenLabs por defecto (Rachel)
+    
+    if not plain_text_script or not plain_text_script.strip():
+        return jsonify({"error": "El guion de texto es requerido"}), 400
+    
+    try:
+        logging.info(f"Generando audio desde texto plano con la voz de ElevenLabs: {voice_id}")
+        public_url = _generate_audio_with_elevenlabs(plain_text_script, voice_id)
+        return jsonify({"audioUrl": public_url})
+
+    except Exception as e:
+        logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
+        return jsonify({"error": f"No se pudo generar el audio completo: {str(e)}"}), 500
+
+# Endpoint de SEO (sin cambios)
+@app.route('/api/generate-seo', methods=['POST'])
+def generate_seo():
+    try:
+        data = request.get_json()
+        guion = data.get('guion')
+        nicho = data.get('nicho')
+        if not guion: return jsonify({"error": "El guion es requerido"}), 400
+        prompt = f"""
+        Eres un experto en SEO para redes sociales (YouTube, TikTok). Basado en el guion para el nicho '{nicho}', genera un JSON con "titulo" (atractivo, < 70 caracteres), "descripcion" (detallada, < 500 caracteres), y "hashtags" (un array de 10-15 strings relevantes). Todo en Español.
+        Guion: --- {guion} ---
+        Asegúrate de que la salida sea únicamente el objeto JSON válido.
+        """
+        response = model_text.generate_content(prompt)
+        parsed_json = safe_json_parse(response.text)
+        if parsed_json: return jsonify(parsed_json)
+        else: return jsonify({"error": "La respuesta del modelo de SEO no tuvo el formato esperado."}), 500
+    except Exception as e:
+        logging.error("Error al generar SEO: %s", e)
+        return jsonify({"error": "Ocurrió un error interno al generar el contenido SEO."}), 500
+
+# Endpoint de muestra de voz (sin cambios)
+@app.route('/api/voice-sample', methods=['POST'])
+def generate_voice_sample():
+    data = request.get_json()
+    voice_id = data.get('voice')
+    if not voice_id: return jsonify({"error": "Se requiere un ID de voz de ElevenLabs"}), 400
+    try:
+        sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
+        public_url = _generate_audio_with_elevenlabs(sample_text, voice_id)
+        return jsonify({"audioUrl": public_url})
+    except Exception as e:
+        logging.error("Error al generar muestra de voz: %s", e)
+        return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 500
+
+# --- 6. EJECUCIÓN DEL SERVIDOR (Sin cambios) ---
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5001))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
