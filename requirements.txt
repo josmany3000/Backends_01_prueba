@@ -1,9 +1,16 @@
 flask
-flask-cors
-python-dotenv
+Flask-Cors
+gunicorn==21.2.0
+
+# Librería para la gestión de estado (la que falta)
+redis
+
+# Librerías para las APIs de Google
 google-generativeai
 google-cloud-storage
-google-cloud-aiplatform
+google-cloud-vertexai
+
+# Otras utilidades
+python-dotenv
 requests
 elevenlabs
-gunicorn==21.2.0
