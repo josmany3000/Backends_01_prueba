@@ -62,7 +62,7 @@ model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
 # --- NUEVO: DICCIONARIO CENTRAL DE PROMPTS POR NICHO ---
 PROMPTS_POR_NICHO = {
-    "misterio_terror": "Escribe una narración de suspenso y terror sobre un evento inexplicable ya sea una leyenda, una Historia documentada o un testimonio de vida real. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
+    "misterio_terror": "Escribe una narración de suspenso y terror sobre un evento inexplicable ya sea una leyenda, una Historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
     "tecnologia_ia": "Genera una narración informativa y futurista sobre un avance reciente en inteligencia artificial o tecnología disruptiva. Investiga en sitios oficiales. El estilo debe ser didáctico, emocionante y accesible para todo público, con ejemplos reales y visión de futuro.",
     "documentales": "Escribe una narración objetiva, informativa y neutral sobre un tema de interés social, cultural o histórico. El tono debe ser serio y documental, con un enfoque en hechos, fechas y análisis profundos. Ideal para un documental narrado.",
