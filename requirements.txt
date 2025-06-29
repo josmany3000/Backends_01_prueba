@@ -5,5 +5,4 @@ google-generativeai
 google-cloud-storage
 google-cloud-aiplatform
 requests
-install elevenlabs
 gunicorn==21.2.0
