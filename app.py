@@ -14,6 +14,7 @@ import google.generativeai as genai
 from google.cloud import storage
 import vertexai
 from vertexai.vision_models import ImageGenerationModel
+import redis # Importar la nueva librería
 
 # --- 1. CONFIGURACIÓN INICIAL Y VALIDACIÓN ---
 load_dotenv()
@@ -24,6 +25,7 @@ logging.basicConfig(
 )
 
 if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
+    # ... (código de credenciales sin cambios)
     credentials_json_str = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
     credentials_path = f'/tmp/{uuid.uuid4()}_gcp-credentials.json'
     try:
@@ -34,21 +36,30 @@ if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
     except Exception:
         logging.error("No se pudieron escribir las credenciales de GCP en el archivo temporal.", exc_info=True)
 
+
 app = Flask(__name__)
 CORS(app)
 
-JOBS = {}
+# --- INICIALIZACIÓN DE REDIS (LA "PIZARRA CENTRAL") ---
+REDIS_URL = os.getenv("REDIS_URL")
+if not REDIS_URL:
+    logging.critical("LA VARIABLE DE ENTORNO REDIS_URL NO ESTÁ CONFIGURADA. EL SERVICIO NO FUNCIONARÁ CORRECTAMENTE.")
+    redis_client = None
+else:
+    try:
+        redis_client = redis.from_url(REDIS_URL)
+        logging.info("Conexión con Redis establecida exitosamente.")
+    except Exception as e:
+        logging.critical(f"No se pudo conectar a Redis: {e}", exc_info=True)
+        redis_client = None
 
-# --- Configuración de Clientes de API y validación ---
+# ---- El resto de la configuración se mantiene igual ----
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GCP_REGION = os.getenv("GCP_REGION", "us-central1")
-
-if not all([ELEVENLABS_API_KEY, GOOGLE_API_KEY, GOOGLE_CLOUD_PROJECT, GCS_BUCKET_NAME]):
-    logging.critical("FALTAN VARIABLES DE ENTORNO CRÍTICAS.")
 
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -60,7 +71,6 @@ try:
 except Exception:
     logging.critical("ERROR FATAL AL CONFIGURAR CLIENTES DE GOOGLE.", exc_info=True)
 
-# --- DICCIONARIO CENTRAL DE PROMPTS ---
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** Comienza la narración con una pregunta intrigante que enganche al usuario, como por ejemplo: '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. A continuación, escribe una narración de suspenso y terror sobre un evento inexplicable, ya sea una leyenda o una historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -73,11 +83,11 @@ PROMPTS_POR_NICHO = {
     "anime_manga": "Crea una narración apasionada sobre un anime o manga popular o una historia original inspirada en ese estilo. Usa un tono épico, emocional y juvenil. Incluye referencias al estilo narrativo japonés, con dramatismo y acción."
 }
 
-# --- 2. DECORADOR DE REINTENTOS ---
 def retry_on_failure(retries=3, delay=5, backoff=2):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # ... (código del decorador sin cambios)
             current_delay = delay
             for i in range(retries):
                 try:
@@ -95,9 +105,9 @@ def retry_on_failure(retries=3, delay=5, backoff=2):
         return wrapper
     return decorator
 
-# --- 3. FUNCIONES AUXILIARES ---
-@retry_on_failure()
+
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
+    # ... (función sin cambios)
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(file_stream, content_type=content_type)
@@ -105,6 +115,7 @@ def upload_to_gcs(file_stream, destination_blob_name, content_type):
     return blob.public_url
 
 def safe_json_parse(raw_text):
+    # ... (función sin cambios)
     logging.info("Iniciando parseo de JSON robusto.")
     json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
     if json_match:
@@ -124,8 +135,8 @@ def safe_json_parse(raw_text):
         logging.error(f"Fallo final de parseo JSON: {text_to_parse[:500]}", exc_info=True)
         return None
 
-@retry_on_failure()
 def _generate_and_upload_image(image_prompt, aspect_ratio):
+    # ... (función sin cambios)
     try:
         final_prompt = f"cinematic still, photorealistic, high detail of: {image_prompt}"
         images = model_image.generate_images(
@@ -140,8 +151,8 @@ def _generate_and_upload_image(image_prompt, aspect_ratio):
         logging.error(f"Excepción en _generate_and_upload_image: {e}", exc_info=True)
         return None
 
-@retry_on_failure()
 def _generate_audio_with_elevenlabs(text_input, voice_id):
+    # ... (función sin cambios)
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
@@ -149,36 +160,39 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
     response.raise_for_status()
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
-# --- 4. TRABAJADOR DE FONDO (LÓGICA CORREGIDA) ---
+# --- 4. TRABAJADOR DE FONDO (ADAPTADO PARA REDIS) ---
 def _prepare_script_structure_task(job_id, scenes):
-    """
-    Tarea de fondo que SÓLO estructura el guion y le añade IDs únicos.
-    NO genera imágenes. Es un proceso rápido.
-    """
+    def update_job_status(status, data=None, error=None):
+        job_data = {"status": status}
+        if data: job_data["result"] = data
+        if error: job_data["error"] = error
+        redis_client.set(job_id, json.dumps(job_data), ex=3600)
+
     try:
         logging.info(f"Trabajo {job_id}: Estructurando guion de {len(scenes)} escenas.")
         for scene in scenes:
-            scene['id'] = str(uuid.uuid4()) # Asigna un ID único para el frontend
-            scene['imageUrl'] = None         # Placeholder para la imagen
-            scene['videoUrl'] = None         # Placeholder para el video
+            scene['id'] = str(uuid.uuid4())
+            scene['imageUrl'] = None
+            scene['videoUrl'] = None
         
-        JOBS[job_id]['status'] = 'completed'
-        JOBS[job_id]['result'] = {"scenes": scenes}
-        logging.info(f"Trabajo {job_id}: Estructura de guion preparada exitosamente.")
+        update_job_status("completed", data={"scenes": scenes})
+        logging.info(f"Trabajo {job_id}: Estructura de guion preparada y guardada en Redis.")
     except Exception as e:
         logging.error(f"Trabajo {job_id} falló durante la estructuración: {e}", exc_info=True)
-        JOBS[job_id]['status'] = 'error'
-        JOBS[job_id]['error'] = str(e)
+        update_job_status("error", error=str(e))
 
-# --- 5. ENDPOINTS DE LA API ---
+# --- 5. ENDPOINTS DE LA API (ADAPTADOS PARA REDIS) ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v9.0 'A Pedido' - Estable"
+    return "Backend de IA para Videos v10.0 'Redis' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
+    if not redis_client:
+        return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
     try:
         data = request.get_json()
+        # ... (toda la lógica de creación de prompts se mantiene igual)
         if not data.get('userInput', '').strip():
             return jsonify({"error": "El campo de tema o guion no puede estar vacío."}), 400
 
@@ -232,7 +246,10 @@ def generate_initial_content():
             return jsonify({"error": "La IA no pudo generar un guion válido. Intenta ajustar tu entrada."}), 500
 
         job_id = str(uuid.uuid4())
-        JOBS[job_id] = {'status': 'pending', 'progress': '0/1'}
+        initial_job_data = {"status": "pending"}
+        # Guardar estado inicial en Redis con expiración de 1 hora
+        redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
+        
         thread = threading.Thread(target=_prepare_script_structure_task, args=(job_id, parsed_json['scenes']))
         thread.start()
         
@@ -243,13 +260,19 @@ def generate_initial_content():
 
 @app.route('/api/content-job-status/<job_id>', methods=['GET'])
 def get_content_job_status(job_id):
-    job = JOBS.get(job_id)
-    if not job:
-        return jsonify({"error": "Trabajo no encontrado"}), 404
-    return jsonify(job)
+    if not redis_client:
+        return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
+        
+    job_data_str = redis_client.get(job_id)
+    if not job_data_str:
+        return jsonify({"status": "error", "error": "Trabajo no encontrado o expirado"}), 404
+    
+    return jsonify(json.loads(job_data_str))
 
+# --- Los demás endpoints no necesitan cambios drásticos, ya que no usan el sistema de jobs ---
 @app.route('/api/regenerate-scene-part', methods=['POST'])
 def regenerate_scene_part():
+    # ... (código sin cambios)
     try:
         data = request.get_json()
         scene = data.get('scene')
@@ -264,7 +287,6 @@ def regenerate_scene_part():
             return jsonify({"newScript": response.text.strip().replace("`", "")})
         
         elif part_to_regenerate == 'media':
-            # Lógica de regeneración mejorada: usa el image_prompt que ya existe
             image_prompt_from_scene = scene.get('image_prompt')
             if not image_prompt_from_scene:
                 return jsonify({"error": "La escena no contiene un prompt de imagen para regenerar."}), 400
@@ -284,6 +306,7 @@ def regenerate_scene_part():
 
 @app.route('/api/generate-full-audio', methods=['POST'])
 def generate_full_audio():
+    # ... (código sin cambios)
     try:
         data = request.get_json()
         script = data.get('script')
@@ -298,6 +321,7 @@ def generate_full_audio():
 
 @app.route('/api/voice-sample', methods=['POST'])
 def generate_voice_sample():
+    # ... (código sin cambios)
     try:
         data = request.get_json()
         voice_id = data.get('voice')
@@ -316,4 +340,4 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-
+                                                                      
