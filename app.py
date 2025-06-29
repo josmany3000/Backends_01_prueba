@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from google.cloud import storage
 import vertexai
-from vertexai.preview.vision_models import ImageGenerationModel
+from vertexai.vision_models import ImageGenerationModel
 
-# --- 1. CONFIGURACIÓN INICIAL Y LOGGING ---
+# --- 1. CONFIGURACIÓN INICIAL Y VALIDACIÓN ---
 load_dotenv()
 
 logging.basicConfig(
@@ -23,7 +23,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 
-# Configuración de credenciales de GCP
 if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
     credentials_json_str = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
     credentials_path = f'/tmp/{uuid.uuid4()}_gcp-credentials.json'
@@ -32,7 +31,7 @@ if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
             f.write(credentials_json_str)
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
         logging.info("Credenciales de GCP cargadas desde variable de entorno.")
-    except Exception as e:
+    except Exception:
         logging.error("No se pudieron escribir las credenciales de GCP en el archivo temporal.", exc_info=True)
 
 app = Flask(__name__)
@@ -40,27 +39,28 @@ CORS(app)
 
 JOBS = {}
 
-# --- Configuración de ElevenLabs ---
+# --- Configuración de Clientes de API y validación ---
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+GCP_REGION = os.getenv("GCP_REGION", "us-central1")
 
-if not ELEVENLABS_API_KEY:
-    logging.warning("La API Key de ElevenLabs (ELEVENLABS_API_KEY) no está configurada. La generación de audio fallará.")
+if not all([ELEVENLABS_API_KEY, GOOGLE_API_KEY, GOOGLE_CLOUD_PROJECT, GCS_BUCKET_NAME]):
+    logging.critical("FALTAN VARIABLES DE ENTORNO CRÍTICAS.")
 
-# --- Configuración de Clientes de Google ---
 try:
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    storage_client = storage.Client(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
-    GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
-    vertexai.init(project=os.getenv("GOOGLE_CLOUD_PROJECT"), location=os.getenv("GCP_REGION", "us-central1"))
-    logging.info("Clientes de Google (Gemini, Storage, VertexAI) configurados exitosamente.")
-except Exception as e:
+    genai.configure(api_key=GOOGLE_API_KEY)
+    storage_client = storage.Client(project=GOOGLE_CLOUD_PROJECT)
+    vertexai.init(project=GOOGLE_CLOUD_PROJECT, location=GCP_REGION)
+    model_text = genai.GenerativeModel('gemini-1.5-flash')
+    model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
+    logging.info("Clientes de Google (Gemini, Storage, VertexAI) y ElevenLabs configurados.")
+except Exception:
     logging.critical("ERROR FATAL AL CONFIGURAR CLIENTES DE GOOGLE.", exc_info=True)
-    
-model_text = genai.GenerativeModel('gemini-1.5-flash')
-model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
-# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO ---
+# --- DICCIONARIO CENTRAL DE PROMPTS ---
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** Comienza la narración con una pregunta intrigante que enganche al usuario, como por ejemplo: '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. A continuación, escribe una narración de suspenso y terror sobre un evento inexplicable, ya sea una leyenda o una historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -83,9 +83,9 @@ def retry_on_failure(retries=3, delay=5, backoff=2):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    if isinstance(e, IndexError):
-                         logging.error(f"Error de IndexError en {func.__name__}. No se reintentará. Causa probable: contenido bloqueado por la API.")
-                         raise e
+                    if "response was blocked" in str(e) or isinstance(e, IndexError):
+                        logging.error(f"Error irrecuperable en {func.__name__}. No se reintentará. Causa probable: contenido bloqueado por la API.")
+                        raise e
                     logging.warning(f"Intento {i + 1}/{retries} para {func.__name__} falló: {e}. Reintentando en {current_delay}s...")
                     if i == retries - 1:
                         logging.error(f"Todos los {retries} intentos para {func.__name__} fallaron.", exc_info=True)
@@ -98,51 +98,50 @@ def retry_on_failure(retries=3, delay=5, backoff=2):
 # --- 3. FUNCIONES AUXILIARES ---
 @retry_on_failure()
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
-    if not GCS_BUCKET_NAME:
-        raise ValueError("El nombre del bucket de GCS no está configurado.")
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(file_stream, content_type=content_type)
     blob.make_public()
     return blob.public_url
 
-def safe_json_parse(text):
-    text = text.strip().replace('```json', '').replace('```', '')
+def safe_json_parse(raw_text):
+    logging.info("Iniciando parseo de JSON robusto.")
+    json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
+    if json_match:
+        text_to_parse = json_match.group(1)
+        logging.info("Bloque JSON explícito ```json ... ``` encontrado.")
+    else:
+        start = raw_text.find('{')
+        end = raw_text.rfind('}')
+        if start != -1 and end != -1:
+            text_to_parse = raw_text[start:end+1]
+        else:
+            logging.error(f"No se pudo encontrar un bloque JSON en la respuesta: {raw_text[:200]}")
+            return None
     try:
-        return json.loads(text)
+        return json.loads(text_to_parse)
     except json.JSONDecodeError:
-        logging.error(f"Error al decodificar JSON. Texto problemático: {text[:500]}", exc_info=True)
+        logging.error(f"Fallo final de parseo JSON: {text_to_parse[:500]}", exc_info=True)
         return None
 
 @retry_on_failure()
-def _get_keywords_for_image_prompt(script_text):
-    prompt_template = "Analiza el texto y extrae 4-5 palabras clave seguras (objetos, lugares) para un generador de imágenes. Formato: palabras separadas por comas. Texto: {script}"
-    prompt = prompt_template.format(script=script_text)
-    response = model_text.generate_content(prompt)
-    return response.text.strip().replace("`", "")
-
-@retry_on_failure()
-def _generate_and_upload_image(scene_script, aspect_ratio):
+def _generate_and_upload_image(image_prompt, aspect_ratio):
     try:
-        keywords = _get_keywords_for_image_prompt(scene_script)
-        image_prompt = f"cinematic still, photorealistic, high detail of: {keywords}"
+        final_prompt = f"cinematic still, photorealistic, high detail of: {image_prompt}"
         images = model_image.generate_images(
-            prompt=image_prompt,
-            number_of_images=1,
-            aspect_ratio=aspect_ratio,
-            negative_prompt="text, watermark, logo, person, people, face, skin"
+            prompt=final_prompt, number_of_images=1, aspect_ratio=aspect_ratio,
+            negative_prompt="text, watermark, logo, person, people, face, skin, deformed, blurry"
         )
         if not images:
-            return None 
+            logging.warning(f"La API de imágenes no devolvió resultados para: {final_prompt}")
+            return None
         return upload_to_gcs(images[0]._image_bytes, f"images/img_{uuid.uuid4()}.png", 'image/png')
     except Exception as e:
-        logging.error(f"Excepción durante la generación de imagen: {e}", exc_info=True)
+        logging.error(f"Excepción en _generate_and_upload_image: {e}", exc_info=True)
         return None
 
 @retry_on_failure()
 def _generate_audio_with_elevenlabs(text_input, voice_id):
-    if not ELEVENLABS_API_KEY:
-        raise ValueError("La API Key de ElevenLabs no está configurada.")
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
@@ -150,86 +149,97 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
     response.raise_for_status()
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
-# --- 4. TRABAJADOR DE FONDO ---
-def _perform_initial_media_generation(job_id, scenes):
+# --- 4. TRABAJADOR DE FONDO (LÓGICA CORREGIDA) ---
+def _prepare_script_structure_task(job_id, scenes):
+    """
+    Tarea de fondo que SÓLO estructura el guion y le añade IDs únicos.
+    NO genera imágenes. Es un proceso rápido.
+    """
     try:
-        total_scenes = len(scenes)
-        scenes_con_media = []
-        for i, scene in enumerate(scenes):
-            JOBS[job_id]['progress'] = f"{i + 1}/{total_scenes}"
-            scene['id'] = scene.get('id', f'scene-{uuid.uuid4()}')
-            scene['imageUrl'] = None
-            scene['videoUrl'] = None
-            scenes_con_media.append(scene)
+        logging.info(f"Trabajo {job_id}: Estructurando guion de {len(scenes)} escenas.")
+        for scene in scenes:
+            scene['id'] = str(uuid.uuid4()) # Asigna un ID único para el frontend
+            scene['imageUrl'] = None         # Placeholder para la imagen
+            scene['videoUrl'] = None         # Placeholder para el video
+        
         JOBS[job_id]['status'] = 'completed'
-        JOBS[job_id]['result'] = {"scenes": scenes_con_media}
-        logging.info(f"Trabajo {job_id}: Estructuración de guion completada.")
+        JOBS[job_id]['result'] = {"scenes": scenes}
+        logging.info(f"Trabajo {job_id}: Estructura de guion preparada exitosamente.")
     except Exception as e:
-        logging.error(f"Trabajo {job_id} falló catastróficamente: {e}", exc_info=True)
+        logging.error(f"Trabajo {job_id} falló durante la estructuración: {e}", exc_info=True)
         JOBS[job_id]['status'] = 'error'
         JOBS[job_id]['error'] = str(e)
 
 # --- 5. ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v7.2 - Estable"
+    return "Backend de IA para Videos v9.0 'A Pedido' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     try:
         data = request.get_json()
+        if not data.get('userInput', '').strip():
+            return jsonify({"error": "El campo de tema o guion no puede estar vacío."}), 400
+
+        output_format_instructions = """
+        FORMATO DE SALIDA OBLIGATORIO:
+        1. Tu respuesta DEBE SER ÚNICAMENTE un objeto JSON válido.
+        2. El JSON debe tener una clave "scenes", que es una lista de objetos.
+        3. Cada objeto de escena DEBE tener estas DOS claves:
+           - "script": El texto del guion para esa escena en {idioma}.
+           - "image_prompt": Una descripción CORTA y VISUAL en INGLÉS para un generador de imágenes (ej: "A dark mysterious forest at night with fog").
+        REGLA CRÍTICA: Si dentro de "script" usas comillas dobles ("), DEBES escaparlas con una barra invertida (\\").
+        """
+        
         nicho = data.get('nicho', 'documentales')
         userInput = data.get('userInput')
-        tipoEntrada = data.get('tipoEntrada', 'tema')
         idioma = data.get('idioma', 'Español Latinoamericano')
-        if not userInput or not userInput.strip():
-            return jsonify({"error": "El campo de tema o guion no puede estar vacío."}), 400
         duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
+        
         prompt_final = ""
-        if tipoEntrada == 'guion':
-            logging.info("Modo 'Guion Personalizado' detectado.")
-            prompt_template_guion = """
+        if data.get('tipoEntrada') == 'guion':
+            prompt_template_guion = f"""
             ROL: Eres un editor de video y guionista experto.
-            TAREA: Analiza el guion del usuario y reestructúralo en {num_escenas} escenas para un video corto en {idioma}.
-            REGLAS:
-            1. Divide el guion en EXACTAMENTE {num_escenas} escenas lógicas.
-            2. La última escena DEBE tener un llamado a la acción (CTA). Si no lo tiene, agrégale uno apropiado para el nicho '{nicho}'.
-            3. El resultado debe ser solo la narración, sin etiquetas como 'ESCENA 1'.
-            GUION DEL USUARIO: "{guion_usuario}"
-            FORMATO DE SALIDA OBLIGATORIO: Un JSON válido con una clave "scenes", que es un array de objetos. Cada objeto tiene "id" y "script". No incluyas nada más.
+            TAREA: Analiza el guion y reestructúralo en {numero_de_escenas} escenas en {idioma}.
+            REGLAS: La última escena DEBE tener un llamado a la acción (CTA) apropiado para el nicho '{nicho}'.
+            GUION: "{userInput}"
+            {output_format_instructions.format(idioma=idioma)}
             """
-            prompt_final = prompt_template_guion.format(num_escenas=numero_de_escenas, idioma=idioma, nicho=nicho, guion_usuario=userInput)
+            prompt_final = prompt_template_guion
         else:
-            logging.info("Modo 'Tema Principal' detectado.")
             instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
             palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
             palabras_por_escena = int(palabras_totales // numero_de_escenas)
-            prompt_template_tema = """
+            prompt_template_tema = f"""
             ROL: Eres un guionista experto para el nicho '{nicho}'.
-            TAREA: Crea un guion sobre "{tema_principal}" en {idioma}.
+            TAREA: Crea un guion sobre "{userInput}" en {idioma}.
             REGLAS:
             1. {instruccion_base}
-            2. Genera EXACTAMENTE {num_escenas} escenas. Cada una con aprox. {num_palabras} palabras.
+            2. Genera EXACTAMENTE {numero_de_escenas} escenas. Cada una con aprox. {palabras_por_escena} palabras.
             3. La última escena DEBE tener un llamado a la acción (CTA).
-            4. El guion debe ser solo texto narrativo, sin etiquetas.
-            FORMATO DE SALIDA OBLIGATORIO: Un JSON válido con una clave "scenes", que es un array de objetos. Cada objeto tiene "id" y "script". No incluyas nada más.
+            {output_format_instructions.format(idioma=idioma)}
             """
-            prompt_final = prompt_template_tema.format(nicho=nicho, tema_principal=userInput, idioma=idioma, instruccion_base=instruccion_base, num_escenas=numero_de_escenas, num_palabras=palabras_por_escena)
+            prompt_final = prompt_template_tema
+        
+        logging.info("Generando guion e image_prompts con la IA...")
         response = model_text.generate_content(prompt_final)
         parsed_json = safe_json_parse(response.text)
+
         if not (parsed_json and 'scenes' in parsed_json and isinstance(parsed_json['scenes'], list) and parsed_json['scenes']):
-            logging.error(f"La IA no pudo generar un guion JSON válido. Respuesta: {response.text}")
+            logging.error(f"La IA no generó un guion JSON válido. Respuesta: {response.text}")
             return jsonify({"error": "La IA no pudo generar un guion válido. Intenta ajustar tu entrada."}), 500
-        scenes = parsed_json['scenes']
+
         job_id = str(uuid.uuid4())
-        JOBS[job_id] = {'status': 'pending', 'progress': f'0/{len(scenes)}'}
-        thread = threading.Thread(target=_perform_initial_media_generation, args=(job_id, scenes))
+        JOBS[job_id] = {'status': 'pending', 'progress': '0/1'}
+        thread = threading.Thread(target=_prepare_script_structure_task, args=(job_id, parsed_json['scenes']))
         thread.start()
+        
         return jsonify({"jobId": job_id})
     except Exception as e:
-        logging.error("Error inesperado en generate_initial_content.", exc_info=True)
-        return jsonify({"error": f"Ocurrió un error interno: {e}"}), 500
+        logging.error("Error en generate_initial_content.", exc_info=True)
+        return jsonify({"error": f"Error interno del servidor: {e}"}), 500
 
 @app.route('/api/content-job-status/<job_id>', methods=['GET'])
 def get_content_job_status(job_id):
@@ -247,16 +257,26 @@ def regenerate_scene_part():
         config = data.get('config')
         if not all([scene, part_to_regenerate, config]):
             return jsonify({"error": "Faltan datos en la solicitud"}), 400
+        
         if part_to_regenerate == 'script':
-            prompt = "Eres un guionista. Reescribe este texto de forma creativa y concisa, en Español Latinoamericano: '{script}'".format(script=scene.get('script'))
+            prompt = f"Reformula este texto de forma creativa y concisa, en Español Latinoamericano: '{scene.get('script')}'"
             response = model_text.generate_content(prompt)
             return jsonify({"newScript": response.text.strip().replace("`", "")})
+        
         elif part_to_regenerate == 'media':
-            aspect_ratio = config.get('resolucion', '16:9')
-            new_image_url = _generate_and_upload_image(scene.get('script', 'una imagen abstracta'), aspect_ratio)
+            # Lógica de regeneración mejorada: usa el image_prompt que ya existe
+            image_prompt_from_scene = scene.get('image_prompt')
+            if not image_prompt_from_scene:
+                return jsonify({"error": "La escena no contiene un prompt de imagen para regenerar."}), 400
+            
+            aspect_ratio = '9:16' if config.get('resolucionVideo') == '9:16' else '16:9'
+            logging.info(f"Regenerando imagen con prompt existente: '{image_prompt_from_scene}'")
+            new_image_url = _generate_and_upload_image(image_prompt_from_scene, aspect_ratio)
+
             if not new_image_url:
                 return jsonify({"error": "La IA no pudo generar una nueva imagen."}), 500
             return jsonify({"newImageUrl": new_image_url, "newVideoUrl": None})
+            
     except Exception as e:
         logging.error(f"Error al regenerar parte de escena: {e}", exc_info=True)
         return jsonify({"error": f"Error interno al regenerar: {str(e)}"}), 500
@@ -267,7 +287,7 @@ def generate_full_audio():
     try:
         data = request.get_json()
         script = data.get('script')
-        voice_id = data.get('voice', '21m00Tcm4TlvDq8ikWAM')
+        voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f')
         if not script or not script.strip():
             return jsonify({"error": "El guion es requerido"}), 400
         public_url = _generate_audio_with_elevenlabs(script, voice_id)
@@ -283,6 +303,7 @@ def generate_voice_sample():
         voice_id = data.get('voice')
         if not voice_id:
             return jsonify({"error": "Se requiere un ID de voz"}), 400
+        
         sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
         public_url = _generate_audio_with_elevenlabs(sample_text, voice_id)
         return jsonify({"audioUrl": public_url})
@@ -292,6 +313,7 @@ def generate_voice_sample():
 
 # --- 6. EJECUCIÓN DEL SERVIDOR ---
 if __name__ == '__main__':
+    from waitress import serve
     port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=False)
-    
+    serve(app, host='0.0.0.0', port=port)
+
