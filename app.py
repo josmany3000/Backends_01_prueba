@@ -60,7 +60,7 @@ except Exception as e:
 model_text = genai.GenerativeModel('gemini-1.5-flash')
 model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
-# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO (Sin cambios) ---
+# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO (ACTUALIZADO) ---
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** Comienza la narración con una pregunta intrigante que enganche al usuario, como por ejemplo: '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. A continuación, escribe una narración de suspenso y terror sobre un evento inexplicable, ya sea una leyenda o una historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -118,7 +118,7 @@ def safe_json_parse(text):
 
 @retry_on_failure()
 def _get_keywords_for_image_prompt(script_text):
-    prompt = f"""
+    prompt_template = """
     Analiza el texto de la escena. Extrae 4-5 palabras clave para un generador de imágenes.
     **REGLAS CRÍTICAS DE SEGURIDAD:**
     1.  **MÁXIMA SEGURIDAD:** Las palabras clave deben ser 100% seguras, neutrales e inofensivas.
@@ -128,9 +128,10 @@ def _get_keywords_for_image_prompt(script_text):
 
     **Texto de la Escena:**
     ---
-    {script_text}
+    {script}
     ---
     """
+    prompt = prompt_template.format(script=script_text)
     response = model_text.generate_content(prompt)
     keywords = response.text.strip().replace("`", "")
     logging.info(f"Keywords de seguridad generadas para el guion: '{keywords}'")
@@ -231,9 +232,9 @@ def _perform_image_generation(job_id, scenes, aspect_ratio):
 # --- 5. ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v6.2 - Corregido y Estable"
+    return "Backend de IA para Videos v7.0 - Hooks, CTA y Guiones Largos"
 
-# --- ENDPOINT DE GENERACIÓN INICIAL (CORREGIDO) ---
+# --- ENDPOINT DE GENERACIÓN INICIAL (ACTUALIZADO Y MEJORADO) ---
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     try:
@@ -246,10 +247,11 @@ def generate_initial_content():
         duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
-        palabras_totales = int(data.get('duracionVideo', 50)) * 2.8 
+        # --- MODIFICACIÓN: Aumento de la cantidad de texto (de 2.5 a 2.8) ---
+        palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
         palabras_por_escena = int(palabras_totales // numero_de_escenas)
 
-        # --- CORRECCIÓN: Se usa .format() para construir el prompt de forma segura ---
+        # --- MODIFICACIÓN: Se usa .format() para construir el prompt de forma segura ---
         prompt_template = """
         **ROL:** Eres un guionista experto y un investigador especializado en el nicho seleccionado.
         **TAREA:** Crea un guion completo para un video corto, siguiendo estrictamente TODAS las instrucciones.
@@ -263,8 +265,8 @@ def generate_initial_content():
         1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
         2.  **TEMA PRINCIPAL:** "{tema_principal}"
         3.  **ESTRUCTURA:** Genera EXACTAMENTE {num_escenas} escenas.
-        4.  **LONGITUD:** Cada escena debe tener un aproximado de **{num_palabras} palabras**. No te limites, puedes escribir un poco más para que la narración sea fluida, pero mantente cerca de este número.
-        5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** La última escena DEBE terminar con una frase que invite al usuario a seguir el canal o suscribirse. Por ejemplo: "Síguenos para más videos" o "Suscríbete para no perderte la próxima historia".
+        4.  **LONGITUD:** Cada escena debe tener un aproximado de **{num_palabras} palabras**. Sé generoso con el texto para que la narración sea rica y detallada.
+        5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** La última escena DEBE terminar con una frase que invite al usuario a seguir el canal o suscribirse. Por ejemplo: "Síguenos para más videos como este." o "Suscríbete para no perderte nuestra próxima historia.".
         6.  **FORMATO DE TEXTO (CRÍTICO):** El guion debe ser solo texto narrativo. **NO INCLUYAS encabezados de escena (como 'EXT. DÍA'), nombres de personajes, ni ninguna etiqueta.**
         
         **FORMATO DE SALIDA (OBLIGATORIO):**
@@ -321,7 +323,7 @@ def regenerate_scene_part():
         return jsonify({"error": "Faltan datos de escena, parte a regenerar o configuración"}), 400
     if part_to_regenerate == 'script':
         try:
-            prompt = f"""
+            prompt_template = """
             Eres un guionista experto. Reescribe el siguiente texto para una escena.
             **REGLAS ESTRICTAS:**
             1.  Mantén la idea central del texto original.
@@ -329,8 +331,9 @@ def regenerate_scene_part():
             3.  **FORMATO OBLIGATORIO:** Devuelve solo el nuevo texto del guion en formato de párrafo narrativo. NO incluyas encabezados de escena (como 'EXT. DÍA'), nombres de personaje, ni ninguna otra etiqueta.
             4.  El idioma debe ser Español Latinoamericano.
             
-            **Texto Original:** '{scene.get('script')}'
+            **Texto Original:** '{script}'
             """
+            prompt = prompt_template.format(script=scene.get('script'))
             response = model_text.generate_content(prompt)
             new_script = response.text.strip().replace("`", "")
             return jsonify({"newScript": new_script})
@@ -368,7 +371,7 @@ def generate_full_audio():
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
         return jsonify({"error": f"No se pudo generar el audio completo: {str(e)}"}), 500
 
-# Endpoint de SEO (CORREGIDO)
+# Endpoint de SEO (MEJORADO)
 @app.route('/api/generate-seo', methods=['POST'])
 def generate_seo():
     try:
@@ -377,6 +380,42 @@ def generate_seo():
         nicho = data.get('nicho')
         if not guion: return jsonify({"error": "El guion es requerido"}), 400
         
-        # --- CORRECCIÓN: Se usa .format() para construir el prompt de forma segura ---
         prompt_template = """
-        Eres un experto en SEO para redes sociales (YouTube, TikTok). Basado en el guion para el nicho '{nicho}', genera un JSON con "titulo" (atractivo, < 70 caracteres), "descripcion" (detallada, < 500 caracteres), y "hashta
+        Eres un experto en SEO para redes sociales (YouTube, TikTok). Basado en el guion para el nicho '{nicho}', genera un JSON con "titulo" (atractivo, < 70 caracteres), "descripcion" (detallada, < 500 caracteres), y "hashtags" (un array de 10-15 strings relevantes). Todo en Español.
+        Guion: ---
+        {guion}
+        ---
+        Asegúrate de que la salida sea únicamente el objeto JSON válido. No incluyas explicaciones ni texto adicional fuera del JSON.
+        """
+        prompt = prompt_template.format(nicho=nicho, guion=guion)
+
+        response = model_text.generate_content(prompt)
+        parsed_json = safe_json_parse(response.text)
+        if parsed_json: 
+            return jsonify(parsed_json)
+        else: 
+            logging.error(f"La respuesta del modelo de SEO no tuvo el formato JSON esperado. Respuesta: {response.text}")
+            return jsonify({"error": "La respuesta del modelo de SEO no tuvo el formato esperado."}), 500
+    except Exception as e:
+        logging.error("Error al generar SEO: %s", e)
+        return jsonify({"error": "Ocurrió un error interno al generar el contenido SEO."}), 500
+
+# Endpoint de muestra de voz (sin cambios)
+@app.route('/api/voice-sample', methods=['POST'])
+def generate_voice_sample():
+    data = request.get_json()
+    voice_id = data.get('voice')
+    if not voice_id: return jsonify({"error": "Se requiere un ID de voz de ElevenLabs"}), 400
+    try:
+        sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
+        public_url = _generate_audio_with_elevenlabs(sample_text, voice_id)
+        return jsonify({"audioUrl": public_url})
+    except Exception as e:
+        logging.error("Error al generar muestra de voz: %s", e)
+        return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 500
+
+# --- 6. EJECUCIÓN DEL SERVIDOR (Sin cambios) ---
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5001))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
