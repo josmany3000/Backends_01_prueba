@@ -258,7 +258,7 @@ def generate_initial_content():
         logging.error("Error en generate_initial_content.", exc_info=True)
         return jsonify({"error": f"Error interno del servidor: {e}"}), 500
 
-@app.route('/api/content-job-status/<job_id>', methods=['GET'])
+@app.route('/api/job-status/<job_id>', methods=['GET'])
 def get_content_job_status(job_id):
     if not redis_client:
         return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
