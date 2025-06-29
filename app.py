@@ -60,7 +60,7 @@ except Exception as e:
 model_text = genai.GenerativeModel('gemini-1.5-flash')
 model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
-# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO (ACTUALIZADO) ---
+# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO (Sin cambios) ---
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** Comienza la narración con una pregunta intrigante que enganche al usuario, como por ejemplo: '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. A continuación, escribe una narración de suspenso y terror sobre un evento inexplicable, ya sea una leyenda o una historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -231,48 +231,53 @@ def _perform_image_generation(job_id, scenes, aspect_ratio):
 # --- 5. ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v6.1 - Hooks y CTA"
+    return "Backend de IA para Videos v6.2 - Corregido y Estable"
 
-# --- ENDPOINT DE GENERACIÓN INICIAL (TOTALMENTE MODIFICADO) ---
+# --- ENDPOINT DE GENERACIÓN INICIAL (CORREGIDO) ---
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     try:
         data = request.get_json()
         logging.info(f"Recibida solicitud de trabajo para generar contenido con datos: {data}")
         
-        # Selecciona el nicho y el prompt correspondiente. 'documentales' es el default.
         nicho = data.get('nicho', 'documentales')
         prompt_instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
         
         duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
-        # --- MODIFICACIÓN: Aumento de la cantidad de texto ---
-        # Aumentamos el multiplicador de 2.5 a 2.8 para obtener un guion un poco más largo
         palabras_totales = int(data.get('duracionVideo', 50)) * 2.8 
         palabras_por_escena = int(palabras_totales // numero_de_escenas)
 
-        # Construcción del prompt final para la IA
-        prompt = f"""
+        # --- CORRECCIÓN: Se usa .format() para construir el prompt de forma segura ---
+        prompt_template = """
         **ROL:** Eres un guionista experto y un investigador especializado en el nicho seleccionado.
         **TAREA:** Crea un guion completo para un video corto, siguiendo estrictamente TODAS las instrucciones.
 
         ---
         **INSTRUCCIONES DEL NICHO SELECCIONADO ({nicho}):**
-        {prompt_instruccion_base}
+        {instruccion_base}
         ---
 
         **REGLAS DE FORMATO Y ESTRUCTURA (OBLIGATORIAS):**
         1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
-        2.  **TEMA PRINCIPAL:** "{data.get('guionPersonalizado')}"
-        3.  **ESTRUCTURA:** Genera EXACTAMENTE {numero_de_escenas} escenas.
-        4.  **LONGITUD:** Cada escena debe tener un aproximado de **{palabras_por_escena} palabras**. No te limites, puedes escribir un poco más para que la narración sea fluida, pero mantente cerca de este número.
+        2.  **TEMA PRINCIPAL:** "{tema_principal}"
+        3.  **ESTRUCTURA:** Genera EXACTAMENTE {num_escenas} escenas.
+        4.  **LONGITUD:** Cada escena debe tener un aproximado de **{num_palabras} palabras**. No te limites, puedes escribir un poco más para que la narración sea fluida, pero mantente cerca de este número.
         5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** La última escena DEBE terminar con una frase que invite al usuario a seguir el canal o suscribirse. Por ejemplo: "Síguenos para más videos" o "Suscríbete para no perderte la próxima historia".
         6.  **FORMATO DE TEXTO (CRÍTICO):** El guion debe ser solo texto narrativo. **NO INCLUYAS encabezados de escena (como 'EXT. DÍA'), nombres de personajes, ni ninguna etiqueta.**
         
         **FORMATO DE SALIDA (OBLIGATORIO):**
         La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto debe tener "id" y "script". NO incluyas ninguna explicación, solo el JSON.
         """
+        prompt = prompt_template.format(
+            nicho=nicho,
+            instruccion_base=prompt_instruccion_base,
+            tema_principal=data.get('guionPersonalizado'),
+            num_escenas=numero_de_escenas,
+            num_palabras=palabras_por_escena
+        )
+        
         logging.info(f"Enviando prompt a Gemini para el nicho '{nicho}' con {numero_de_escenas} escenas y aprox. {palabras_por_escena} palabras por escena.")
         response = model_text.generate_content(prompt)
         
@@ -363,7 +368,7 @@ def generate_full_audio():
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
         return jsonify({"error": f"No se pudo generar el audio completo: {str(e)}"}), 500
 
-# Endpoint de SEO (sin cambios)
+# Endpoint de SEO (CORREGIDO)
 @app.route('/api/generate-seo', methods=['POST'])
 def generate_seo():
     try:
@@ -371,7 +376,7 @@ def generate_seo():
         guion = data.get('guion')
         nicho = data.get('nicho')
         if not guion: return jsonify({"error": "El guion es requerido"}), 400
-        prompt = f"""
-        Eres un experto en SEO para redes sociales (YouTube, TikTok). Basado en el guion para el nicho '{nicho}', genera un JSON con "titulo" (atractivo, < 70 caracteres), "descripcion" (detallada, < 500 caracteres), y "hashtags" (un array de 10-15 strings relevantes). Todo en Español.
-        Guion: --- {guion} ---
-        Asegúrate de que la salida sea únicamente el objet
+        
+        # --- CORRECCIÓN: Se usa .format() para construir el prompt de forma segura ---
+        prompt_template = """
+        Eres un experto en SEO para redes sociales (YouTube, TikTok). Basado en el guion para el nicho '{nicho}', genera un JSON con "titulo" (atractivo, < 70 caracteres), "descripcion" (detallada, < 500 caracteres), y "hashta
