@@ -23,6 +23,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 
+# Configuración de credenciales de GCP
 if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
     credentials_json_str = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
     credentials_path = f'/tmp/{uuid.uuid4()}_gcp-credentials.json'
@@ -39,12 +40,14 @@ CORS(app)
 
 JOBS = {}
 
+# --- Configuración de ElevenLabs ---
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
 
 if not ELEVENLABS_API_KEY:
     logging.warning("La API Key de ElevenLabs (ELEVENLABS_API_KEY) no está configurada. La generación de audio fallará.")
 
+# --- Configuración de Clientes de Google ---
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
     storage_client = storage.Client(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
@@ -57,6 +60,7 @@ except Exception as e:
 model_text = genai.GenerativeModel('gemini-1.5-flash')
 model_image = ImageGenerationModel.from_pretrained("imagegeneration@006")
 
+# --- DICCIONARIO CENTRAL DE PROMPTS POR NICHO ---
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** Comienza la narración con una pregunta intrigante que enganche al usuario, como por ejemplo: '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. A continuación, escribe una narración de suspenso y terror sobre un evento inexplicable, ya sea una leyenda o una historia documentada. Usa un tono oscuro, misterioso y con giros inesperados. Mantén al oyente al borde del asiento y genera tensión con descripciones visuales y auditivas.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -159,109 +163,108 @@ def _generate_and_upload_image(scene_script, aspect_ratio):
 @retry_on_failure()
 def _generate_audio_with_elevenlabs(text_input, voice_id):
     logging.info(f"Llamando a la API de ElevenLabs con la voz '{voice_id}'.")
-    if not ELEVENLABS_API_KEY: raise ValueError("La API Key de ElevenLabs no está configurada.")
+    if not ELEVENLABS_API_KEY:
+        raise ValueError("La API Key de ElevenLabs no está configurada.")
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
     response = requests.post(tts_url, json=data, headers=headers)
-    response.raise_for_status() 
+    response.raise_for_status()
     logging.info("Respuesta de la API de ElevenLabs recibida exitosamente.")
     public_url = upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
     return public_url
 
 # --- 4. TRABAJADOR DE FONDO ---
 def _perform_initial_media_generation(job_id, scenes, aspect_ratio):
-    # Esta función ahora solo se encarga de las imágenes, el backend de Pixabay se encarga del video.
-    # El nombre se mantiene por retrocompatibilidad con cómo se llama, pero su lógica está simplificada.
     total_scenes = len(scenes)
     scenes_con_media = []
     try:
+        # Nota: La búsqueda de media en Pixabay se hace ahora en el frontend.
+        # Este trabajador solo genera las imágenes iniciales si es necesario (ej. para un futuro modo 'solo IA').
+        # Por ahora, nos enfocaremos en la generación del guion.
+        # Las imágenes se regeneran una a una en el paso 2.
+        # Aquí, simplemente pasamos las escenas con URL de media vacías.
+        
         for i, scene in enumerate(scenes):
-            JOBS[job_id]['status'] = 'processing'
             JOBS[job_id]['progress'] = f"{i + 1}/{total_scenes}"
-            logging.info(f"Trabajo {job_id}: Procesando media para escena {i+1}/{total_scenes}")
             scene['id'] = scene.get('id', f'scene-{uuid.uuid4()}')
-            
-            # NOTA: Este backend ya no busca videos. Solo genera las imágenes si el guion es reestructurado.
-            # La búsqueda en Pixabay se hace en el frontend después de recibir el guion.
-            # Sin embargo, si reestructuramos un guion, sí podríamos querer generar imágenes nuevas aquí.
-            
-            scene['videoUrl'] = None
-            scene['imageUrl'] = None # Se deja en blanco para que el frontend busque en Pixabay
+            scene['imageUrl'] = None # Se buscará en el frontend
+            scene['videoUrl'] = None # Se buscará en el frontend
             scenes_con_media.append(scene)
 
         JOBS[job_id]['status'] = 'completed'
         JOBS[job_id]['result'] = {"scenes": scenes_con_media}
-        logging.info(f"Trabajo {job_id} de generación de guion completado. Media será buscada por el frontend.")
+        logging.info(f"Trabajo {job_id} de estructuración de guion completado. Las escenas están listas para la búsqueda de media en el frontend.")
+
     except Exception as e:
         logging.error(f"Trabajo {job_id} falló catastróficamente: {e}", exc_info=True)
         JOBS[job_id]['status'] = 'error'
         JOBS[job_id]['error'] = str(e)
 
-
 # --- 5. ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v8.0 - Guion Personalizado y Refactorizado"
+    return "Backend de IA para Videos v7.1 - Lógica de Guion Personalizado"
 
-# --- ENDPOINT DE GENERACIÓN INICIAL (ACTUALIZADO Y REFACTORIZADO) ---
+# --- ENDPOINT DE GENERACIÓN INICIAL (ACTUALIZADO CON LÓGICA CONDICIONAL) ---
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
     try:
         data = request.get_json()
-        logging.info(f"Recibida solicitud de trabajo para generar contenido con datos: {data}")
+        logging.info(f"Recibida solicitud para generar contenido: {data}")
 
-        # --- MODIFICACIÓN: Leer los nuevos datos del frontend ---
-        user_input = data.get('userInput')
-        tipo_entrada = data.get('tipoEntrada', 'tema') # 'tema' es el valor por defecto
-
-        if not user_input:
-            return jsonify({"error": "El campo de texto (tema o guion) no puede estar vacío."}), 400
-
+        # --- RECOPILACIÓN DE DATOS DEL FRONTEND ---
         nicho = data.get('nicho', 'documentales')
-        prompt_instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
-        
+        userInput = data.get('userInput')
+        tipoEntrada = data.get('tipoEntrada', 'tema') # 'tema' o 'guion'
+        idioma = data.get('idioma', 'Español Latinoamericano')
+
+        if not userInput or not userInput.strip():
+            return jsonify({"error": "El campo de tema o guion no puede estar vacío."}), 400
+
         duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
-        palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
-        palabras_por_escena = int(palabras_totales // numero_de_escenas)
-
         prompt_final = ""
 
-        # --- MODIFICACIÓN: Lógica condicional para elegir el prompt correcto ---
-        if tipo_entrada == 'guion':
-            # ROL: Editor de Guiones. Toma un guion existente y lo reestructura.
-            logging.info(f"Modo 'Guion Personalizado' detectado. Reestructurando guion de usuario.")
-            prompt_template_restructure = """
-            **ROL:** Eres un editor de guiones experto. Tu tarea es analizar, limpiar y reestructurar el texto proporcionado por el usuario.
+        # --- LÓGICA CONDICIONAL PARA SELECCIONAR EL PROMPT CORRECTO ---
+        if tipoEntrada == 'guion':
+            # MODO 1: El usuario proporcionó un guion completo para reestructurar.
+            logging.info("Modo 'Guion Personalizado' detectado. Creando prompt de reestructuración.")
+            prompt_template_guion = """
+            **ROL:** Eres un editor de video y guionista experto.
+            **TAREA:** Analiza el guion proporcionado por el usuario y reestructúralo en un formato de escenas para un video corto.
             
-            **TAREA:** Toma el siguiente guion y adáptalo a una estructura de video, siguiendo TODAS las reglas.
+            ---
+            **INSTRUCCIONES PRECISAS:**
+            1.  **DIVISIÓN DE ESCENAS:** Divide el guion en EXACTAMENTE **{num_escenas} escenas**. Cada escena debe representar una parte lógica de la narración.
+            2.  **IDIOMA:** Mantén el idioma original del texto, que debería ser **{idioma}**.
+            3.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** Revisa la última escena. Si no contiene un llamado a la acción (CTA) claro (como "síguenos", "suscríbete", "comenta"), agrégale uno apropiado para el nicho de '{nicho}'.
+            4.  **LIMPIEZA:** No incluyas en el resultado final ningún encabezado de escena (como 'ESCENA 1'), nombres de personajes, o cualquier texto que no sea la narración en sí.
             
-            **REGLAS DE REESTRUCTURACIÓN (OBLIGATORIAS):**
-            1.  **DIVISIÓN DE ESCENAS:** Divide el contenido del guion en EXACTAMENTE **{num_escenas} escenas**. Intenta que cada escena tenga una longitud similar.
-            2.  **CONSERVACIÓN:** Mantén las ideas y el lenguaje del usuario tanto como sea posible. Tu trabajo es organizar, no reescribir por completo.
-            3.  **LIMPIEZA:** Elimina cualquier texto que no sea narrativo (ej. "Escena 1:", "Narrador:", notas del autor, etc.). Solo debe quedar el texto que se leerá.
-            4.  **IDIOMA:** El guion final debe estar en **Español Latinoamericano**.
-            5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** Si el guion del usuario no tiene un llamado a la acción claro (CTA), añade uno al final de la última escena. Ej: "Síguenos para no perderte la próxima historia."
-
-            **FORMATO DE SALIDA (CRÍTICO):**
-            La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto debe tener "id" y "script". NO incluyas ninguna explicación, solo el JSON.
-
+            **GUION DEL USUARIO A PROCESAR:**
             ---
-            **GUION PROPORCIONADO POR EL USUARIO PARA REESTRUCTURAR:**
-            {user_script}
+            {guion_usuario}
             ---
+
+            **FORMATO DE SALIDA (CRÍTICO Y OBLIGATORIO):**
+            La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave principal "scenes", que es un array de objetos. Cada objeto en el array representa una escena y debe tener dos claves: "id" (un string único como "scene-1", "scene-2", etc.) y "script" (el texto de la narración para esa escena). NO incluyas ninguna explicación, solo el JSON.
             """
-            prompt_final = prompt_template_restructure.format(
+            prompt_final = prompt_template_guion.format(
                 num_escenas=numero_de_escenas,
-                user_script=user_input
+                idioma=idioma,
+                nicho=nicho,
+                guion_usuario=userInput
             )
 
-        else: # El tipo de entrada es "tema"
-            # ROL: Guionista Creativo. Crea un guion desde cero basado en un tema.
-            logging.info(f"Modo 'Tema Principal' detectado. Creando un nuevo guion.")
-            prompt_template_create = """
+        else: # El valor por defecto es 'tema'
+            # MODO 2: El usuario proporcionó un tema para que la IA cree el guion.
+            logging.info("Modo 'Tema Principal' detectado. Creando prompt de generación de guion.")
+            prompt_instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
+            palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
+            palabras_por_escena = int(palabras_totales // numero_de_escenas)
+            
+            prompt_template_tema = """
             **ROL:** Eres un guionista experto y un investigador especializado en el nicho seleccionado.
             **TAREA:** Crea un guion completo para un video corto, siguiendo estrictamente TODAS las instrucciones.
 
@@ -271,42 +274,43 @@ def generate_initial_content():
             ---
 
             **REGLAS DE FORMATO Y ESTRUCTURA (OBLIGATORIAS):**
-            1.  **IDIOMA:** El guion debe estar en **Español Latinoamericano**.
+            1.  **IDIOMA:** El guion debe estar en **{idioma}**.
             2.  **TEMA PRINCIPAL:** "{tema_principal}"
             3.  **ESTRUCTURA:** Genera EXACTAMENTE {num_escenas} escenas.
             4.  **LONGITUD:** Cada escena debe tener un aproximado de **{num_palabras} palabras**. Sé generoso con el texto.
-            5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** La última escena DEBE terminar con una frase que invite al usuario a seguir el canal o suscribirse.
-            6.  **FORMATO DE TEXTO (CRÍTICO):** El guion debe ser solo texto narrativo. NO INCLUYAS encabezados, nombres de personajes, ni ninguna etiqueta.
+            5.  **LLAMADO A LA ACCIÓN (OBLIGATORIO):** La última escena DEBE terminar con una frase que invite al usuario a seguir o suscribirse.
+            6.  **FORMATO DE TEXTO (CRÍTICO):** El guion debe ser solo texto narrativo. NO INCLUYAS encabezados de escena, nombres de personajes, ni ninguna etiqueta.
             
             **FORMATO DE SALIDA (OBLIGATORIO):**
-            La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido. El JSON debe tener una clave "scenes", que es un array de objetos. Cada objeto debe tener "id" y "script". NO incluyas ninguna explicación, solo el JSON.
+            La respuesta DEBE SER ÚNICAMENTE un objeto JSON válido con una clave "scenes", que es un array de objetos. Cada objeto debe tener "id" y "script". NO incluyas ninguna explicación, solo el JSON.
             """
-            prompt_final = prompt_template_create.format(
+            prompt_final = prompt_template_tema.format(
                 nicho=nicho,
                 instruccion_base=prompt_instruccion_base,
-                tema_principal=user_input,
+                idioma=idioma,
+                tema_principal=userInput,
                 num_escenas=numero_de_escenas,
                 num_palabras=palabras_por_escena
             )
 
-        logging.info("Enviando prompt final a Gemini.")
+        logging.info(f"Enviando prompt final a Gemini para el modo '{tipoEntrada}'.")
         response = model_text.generate_content(prompt_final)
         
         parsed_json = safe_json_parse(response.text)
-        if not (parsed_json and 'scenes' in parsed_json and isinstance(parsed_json['scenes'], list)):
-            logging.error(f"La IA no pudo generar un guion con el formato correcto. Respuesta: {response.text}")
-            return jsonify({"error": "La IA no pudo generar un guion válido. Intenta de nuevo con un tema/guion diferente."}), 500
+        if not (parsed_json and 'scenes' in parsed_json and isinstance(parsed_json['scenes'], list) and parsed_json['scenes']):
+            logging.error(f"La IA no pudo generar un guion con el formato JSON correcto. Respuesta: {response.text}")
+            return jsonify({"error": "La IA no pudo generar un guion válido. Intenta de nuevo o ajusta tu entrada."}), 500
         
         scenes = parsed_json['scenes']
-        logging.info(f"Guion generado/reestructurado con {len(scenes)} escenas. Creando trabajo en segundo plano.")
+        logging.info(f"Guion generado/estructurado con {len(scenes)} escenas. Creando trabajo en segundo plano.")
         
-        # El backend ya no genera imágenes/videos iniciales. Lo delega al frontend y a otro backend.
-        # Solo crea el trabajo para mantener la consistencia del flujo.
         job_id = str(uuid.uuid4())
         JOBS[job_id] = {'status': 'pending', 'progress': f'0/{len(scenes)}'}
         
-        # Lanzamos un hilo que simplemente marca el trabajo como completo y devuelve las escenas.
-        thread = threading.Thread(target=_perform_initial_media_generation, args=(job_id, scenes, data.get('resolucionVideo', '16:9')))
+        # En esta nueva arquitectura, el backend solo estructura el guion.
+        # El frontend se encargará de buscar la media inicial.
+        # Por lo tanto, el trabajo de fondo simplemente formatea las escenas y las marca como completadas.
+        thread = threading.Thread(target=_perform_initial_media_generation, args=(job_id, scenes, None))
         thread.start()
         
         return jsonify({"jobId": job_id})
@@ -315,12 +319,12 @@ def generate_initial_content():
         logging.error("Error inesperado en generate_initial_content.", exc_info=True)
         return jsonify({"error": f"Ocurrió un error interno al iniciar el trabajo: {e}"}), 500
 
-# --- EL RESTO DE ENDPOINTS PERMANECEN IGUAL ---
 
 @app.route('/api/content-job-status/<job_id>', methods=['GET'])
 def get_content_job_status(job_id):
     job = JOBS.get(job_id)
-    if not job: return jsonify({"error": "Trabajo no encontrado"}), 404
+    if not job:
+        return jsonify({"error": "Trabajo no encontrado"}), 404
     return jsonify(job)
 
 @app.route('/api/regenerate-scene-part', methods=['POST'])
@@ -336,11 +340,9 @@ def regenerate_scene_part():
             prompt_template = """
             Eres un guionista experto. Reescribe el siguiente texto para una escena.
             **REGLAS ESTRICTAS:**
-            1.  Mantén la idea central del texto original.
-            2.  Sé creativo y conciso.
-            3.  **FORMATO OBLIGATORIO:** Devuelve solo el nuevo texto del guion. NO incluyas etiquetas.
-            4.  El idioma debe ser Español Latinoamericano.
-            
+            1.  Mantén la idea central del texto original. Sé creativo y conciso.
+            2.  **FORMATO OBLIGATORIO:** Devuelve solo el nuevo texto del guion en formato de párrafo narrativo.
+            3.  El idioma debe ser Español Latinoamericano.
             **Texto Original:** '{script}'
             """
             prompt = prompt_template.format(script=scene.get('script'))
@@ -352,4 +354,6 @@ def regenerate_scene_part():
             return jsonify({"error": "Error al contactar al modelo de IA."}), 500
     elif part_to_regenerate == 'media':
         try:
-            aspect_ratio = config.get('resolucion') or config.get('resolucionVideo', '16:9
+            aspect_ratio = config.get('resolucion', '16:9')
+            new_image_url = _generate_and_upload_image(scene.get('script', 'una imagen abstracta'), aspect_ratio)
+  
