@@ -157,6 +157,8 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
     response = requests.post(tts_url, json=data, headers=headers)
+    if response.status_code != 200:
+    logging.error(f"Error ElevenLabs {response.status_code}: {response.text}")
     response.raise_for_status()
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
