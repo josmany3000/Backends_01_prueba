@@ -107,7 +107,6 @@ def retry_on_failure(retries=3, delay=5, backoff=2):
 
 
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
-    # ... (función sin cambios)
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(file_stream, content_type=content_type)
@@ -115,7 +114,6 @@ def upload_to_gcs(file_stream, destination_blob_name, content_type):
     return blob.public_url
 
 def safe_json_parse(raw_text):
-    # ... (función sin cambios)
     logging.info("Iniciando parseo de JSON robusto.")
     json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
     if json_match:
@@ -136,7 +134,6 @@ def safe_json_parse(raw_text):
         return None
 
 def _generate_and_upload_image(image_prompt, aspect_ratio):
-    # ... (función sin cambios)
     try:
         final_prompt = f"cinematic still, photorealistic, high detail of: {image_prompt}"
         images = model_image.generate_images(
@@ -151,16 +148,33 @@ def _generate_and_upload_image(image_prompt, aspect_ratio):
         logging.error(f"Excepción en _generate_and_upload_image: {e}", exc_info=True)
         return None
 
+# ##########################################################################
+# ################ SECCIÓN CORREGIDA #######################################
+# ##########################################################################
 def _generate_audio_with_elevenlabs(text_input, voice_id):
-    # ... (función sin cambios)
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
+    
     response = requests.post(tts_url, json=data, headers=headers)
-    if response.status_code != 200:
-    logging.error(f"Error ElevenLabs {response.status_code}: {response.text}")
+
+    # --- CÓDIGO CORREGIDO Y MEJORADO ---
+    # Si la respuesta NO fue exitosa (ej. error 4xx o 5xx), 'response.ok' será False.
+    if not response.ok:
+        # Registramos el mensaje de error EXACTO que nos da la API para facilitar la depuración.
+        # Esta línea ahora tiene la sangría (espacios) correcta.
+        logging.error(
+            f"Error en la API de ElevenLabs. Código: {response.status_code}. Mensaje: {response.text}"
+        )
+    
+    # Esta línea se mantiene para detener la ejecución si hay un error y lanzar una excepción.
     response.raise_for_status()
+    
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
+# ##########################################################################
+# ##########################################################################
+# ##########################################################################
+
 
 # --- 4. TRABAJADOR DE FONDO (ADAPTADO PARA REDIS) ---
 def _prepare_script_structure_task(job_id, scenes):
@@ -194,7 +208,6 @@ def generate_initial_content():
         return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
     try:
         data = request.get_json()
-        # ... (toda la lógica de creación de prompts se mantiene igual)
         if not data.get('userInput', '').strip():
             return jsonify({"error": "El campo de tema o guion no puede estar vacío."}), 400
 
@@ -249,7 +262,6 @@ def generate_initial_content():
 
         job_id = str(uuid.uuid4())
         initial_job_data = {"status": "pending"}
-        # Guardar estado inicial en Redis con expiración de 1 hora
         redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
         thread = threading.Thread(target=_prepare_script_structure_task, args=(job_id, parsed_json['scenes']))
@@ -271,10 +283,8 @@ def get_content_job_status(job_id):
     
     return jsonify(json.loads(job_data_str))
 
-# --- Los demás endpoints no necesitan cambios drásticos, ya que no usan el sistema de jobs ---
 @app.route('/api/regenerate-scene-part', methods=['POST'])
 def regenerate_scene_part():
-    # ... (código sin cambios)
     try:
         data = request.get_json()
         scene = data.get('scene')
@@ -308,7 +318,6 @@ def regenerate_scene_part():
 
 @app.route('/api/generate-full-audio', methods=['POST'])
 def generate_full_audio():
-    # ... (código sin cambios)
     try:
         data = request.get_json()
         script = data.get('script')
@@ -323,7 +332,6 @@ def generate_full_audio():
 
 @app.route('/api/voice-sample', methods=['POST'])
 def generate_voice_sample():
-    # ... (código sin cambios)
     try:
         data = request.get_json()
         voice_id = data.get('voice')
@@ -342,4 +350,5 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-                                                                      
+
+            
