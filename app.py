@@ -15,7 +15,7 @@ from google.cloud import storage
 import vertexai
 from vertexai.vision_models import ImageGenerationModel
 import redis
-from num2words import num2words # <-- DEPENDENCIA AÑADIDA
+from num2words import num2words
 
 # --- 1. CONFIGURACIÓN INICIAL Y VALIDACIÓN ---
 load_dotenv()
@@ -81,17 +81,9 @@ PROMPTS_POR_NICHO = {
     "anime_manga": "Crea una narración apasionada sobre un anime o manga popular o una historia original inspirada en ese estilo. Usa un tono épico, emocional y juvenil. Incluye referencias al estilo narrativo japonés, con dramatismo y acción."
 }
 
-# --- NUEVA FUNCIÓN AUXILIAR PARA CORREGIR AUDIO ---
 def convertir_numeros_a_texto(texto):
-    """
-    Busca todos los números en un texto y los convierte a palabras en español.
-    Ejemplo: "En 1945, se encontraron 3 objetos." -> "En mil novecientos cuarenta y cinco, se encontraron tres objetos."
-    """
     if not texto:
         return texto
-    
-    # Usamos re.sub con una función lambda para reemplazar cada número encontrado
-    # \d+ coincide con una o más secuencias de dígitos
     return re.sub(r'\d+', lambda match: num2words(int(match.group(0)), lang='es'), texto)
 
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
@@ -136,14 +128,37 @@ def _generate_and_upload_image(image_prompt, aspect_ratio):
         logging.error(f"Excepción en _generate_and_upload_image: {e}", exc_info=True)
         return None
 
+# --- FUNCIÓN DE AUDIO MEJORADA Y MÁS ROBUSTA ---
 def _generate_audio_with_elevenlabs(text_input, voice_id):
+    """Genera audio y verifica que la respuesta sea un archivo de audio válido."""
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
+    
     response = requests.post(tts_url, json=data, headers=headers)
+
+    # Verificación #1: Chequea el código de estado HTTP
     if not response.ok:
-        logging.error(f"Error en la API de ElevenLabs. Código: {response.status_code}. Mensaje: {response.text}")
-    response.raise_for_status()
+        error_details = ""
+        try:
+            error_details = response.json()
+        except json.JSONDecodeError:
+            error_details = response.text
+        logging.error(f"Error en la API de ElevenLabs. Código: {response.status_code}. Detalles: {error_details}")
+        response.raise_for_status()
+
+    # Verificación #2: Chequea que la respuesta sea realmente un audio y no esté vacía
+    content_type = response.headers.get('Content-Type', '')
+    if 'audio/mpeg' not in content_type or not response.content:
+        logging.error(
+            f"La API de ElevenLabs no devolvió un archivo de audio válido. "
+            f"Content-Type recibido: '{content_type}', "
+            f"Tamaño del contenido: {len(response.content)} bytes. "
+            f"Esto puede indicar que se ha agotado la cuota de caracteres o un problema de la API."
+        )
+        raise ValueError("La respuesta de la API de voz estaba vacía o no era un archivo de audio válido.")
+
+    logging.info(f"Audio recibido de ElevenLabs. Tamaño: {len(response.content)} bytes. Subiendo a GCS...")
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
 def _generate_script_and_prepare_structure_task(job_id, prompt_final):
@@ -181,7 +196,7 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v12.0 'Consistente y Claro' - Estable"
+    return "Backend de IA para Videos v13.0 'Audio Robusto' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
@@ -225,7 +240,6 @@ def generate_initial_content():
             instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
             palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
             palabras_por_escena = int(palabras_totales // numero_de_escenas)
-            # --- PROMPT MEJORADO PARA DAR CONSISTENCIA ---
             prompt_template_tema = f"""
             ROL: Eres un guionista experto para el nicho '{nicho}'.
             TAREA: Crea un guion sobre el tema principal: "{userInput}".
@@ -306,9 +320,7 @@ def generate_full_audio():
         if not script or not script.strip():
             return jsonify({"error": "El guion es requerido"}), 400
         
-        # --- CORRECCIÓN DE AUDIO APLICADA AQUÍ ---
-        # Se convierte el guion con números a un guion con palabras antes de enviarlo a la API de voz.
-        logging.info(f"Guion original recibido: '{script[:80]}...'")
+        logging.info(f"Guion original recibido para audio: '{script[:80]}...'")
         script_procesado = convertir_numeros_a_texto(script)
         logging.info(f"Guion procesado (números a texto) para ElevenLabs: '{script_procesado[:80]}...'")
         
@@ -316,7 +328,7 @@ def generate_full_audio():
         return jsonify({"audioUrl": public_url})
     except Exception as e:
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
-        return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 500
+        return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 502
 
 @app.route('/api/voice-sample', methods=['POST'])
 def generate_voice_sample():
@@ -327,16 +339,16 @@ def generate_voice_sample():
             return jsonify({"error": "Se requiere un ID de voz"}), 400
         
         sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
-        # La muestra no tiene números, pero es buena práctica usar la función por si acaso.
         sample_text_procesado = convertir_numeros_a_texto(sample_text)
         public_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
         return jsonify({"audioUrl": public_url})
     except Exception as e:
         logging.error("Error al generar muestra de voz: %s", e)
-        return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 500
+        return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 502
 
 # --- 6. EJECUCIÓN DEL SERVIDOR ---
 if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
+    
