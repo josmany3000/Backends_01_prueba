@@ -4,7 +4,7 @@ gunicorn==21.2.0
 
 # Librería para la gestión de estado
 redis
-
+num2words
 # Librerías para las APIs de Google (versión corregida)
 google-generativeai
 google-cloud-storage
