@@ -6,7 +6,6 @@ import logging
 import time
 import re
 import threading
-import datetime  # Dependencia para la expiración de la URL
 from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -89,27 +88,24 @@ def convertir_numeros_a_texto(texto):
 
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
     """
-    Sube un archivo a GCS como objeto PRIVADO y devuelve una URL firmada (temporal) para su acceso.
+    Sube un archivo a GCS como objeto PÚBLICO y devuelve su URL pública permanente.
     """
-    bucket = storage_client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(destination_blob_name)
-    
-    logging.info(f"Subiendo {len(file_stream)} bytes a GCS en {destination_blob_name}...")
-    blob.upload_from_string(file_stream, content_type=content_type)
-    logging.info("Subida completada.")
-
-    expiration_time = datetime.timedelta(minutes=30)
     try:
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=expiration_time,
-            method="GET"
-        )
-        logging.info("URL firmada generada exitosamente.")
-        return signed_url
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(destination_blob_name)
+        
+        logging.info(f"Subiendo {len(file_stream)} bytes a GCS en {destination_blob_name}...")
+        
+        # Sube el objeto. Los permisos de lectura pública se heredan del bucket
+        # o se pueden forzar con `predefined_acl='publicRead'`.
+        blob.upload_from_string(file_stream, content_type=content_type)
+        
+        logging.info(f"Subida completada. URL pública: {blob.public_url}")
+        
+        # Devuelve la URL pública y permanente del objeto.
+        return blob.public_url
     except Exception as e:
-        logging.error(f"¡FALLO CRÍTICO! No se pudo generar la URL firmada. "
-                      f"Verifica que la cuenta de servicio tenga el rol 'Service Account Token Creator'. Error: {e}", exc_info=True)
+        logging.error(f"¡FALLO CRÍTICO! No se pudo subir el archivo a GCS. Error: {e}", exc_info=True)
         raise
 
 def safe_json_parse(raw_text):
@@ -211,7 +207,7 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v15.0 'URLs Firmadas' - Estable"
+    return "Backend de IA para Videos v16.0 'URLs Públicas' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS'])
 def generate_initial_content():
@@ -346,8 +342,11 @@ def generate_full_audio():
         script_procesado = convertir_numeros_a_texto(script)
         logging.info(f"Guion procesado (números a texto) para ElevenLabs: '{script_procesado[:80]}...'")
         
-        public_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
-        return jsonify({"audioUrl": public_url})
+        audio_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
+        if not audio_url:
+            raise Exception("La función _generate_audio_with_elevenlabs no devolvió una URL.")
+
+        return jsonify({"audioUrl": audio_url})
     except Exception as e:
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
         return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 502
@@ -365,8 +364,11 @@ def generate_voice_sample():
         sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
         sample_text_procesado = convertir_numeros_a_texto(sample_text)
         
-        public_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
-        return jsonify({"audioUrl": public_url})
+        audio_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
+        if not audio_url:
+            raise Exception("La función _generate_audio_with_elevenlabs no devolvió una URL para la muestra.")
+            
+        return jsonify({"audioUrl": audio_url})
     except Exception as e:
         logging.error("Error al generar muestra de voz: %s", e)
         return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 502
