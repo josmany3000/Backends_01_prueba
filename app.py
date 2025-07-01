@@ -6,7 +6,7 @@ import logging
 import time
 import re
 import threading
-import datetime  # <-- DEPENDENCIA AÑADIDA
+import datetime  # Dependencia para la expiración de la URL
 from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -89,16 +89,19 @@ def convertir_numeros_a_texto(texto):
 
 # --- FUNCIÓN DE SUBIDA A GCS ACTUALIZADA PARA USAR URLS FIRMADAS ---
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
-    """Sube un archivo a GCS y devuelve una URL firmada de corta duración."""
+    """
+    Sube un archivo a GCS como objeto PRIVADO y devuelve una URL firmada (temporal) para su acceso.
+    """
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
     
     logging.info(f"Subiendo {len(file_stream)} bytes a GCS en {destination_blob_name}...")
+    # El archivo se sube y permanece privado por defecto.
     blob.upload_from_string(file_stream, content_type=content_type)
     logging.info("Subida completada.")
 
     # Genera una URL firmada que expira en 30 minutos.
-    # Esto es más seguro y fiable que hacer el objeto público.
+    # Este es el método seguro que no requiere CORS ni objetos públicos.
     expiration_time = datetime.timedelta(minutes=30)
     try:
         signed_url = blob.generate_signed_url(
@@ -111,6 +114,8 @@ def upload_to_gcs(file_stream, destination_blob_name, content_type):
     except Exception as e:
         logging.error(f"¡FALLO CRÍTICO! No se pudo generar la URL firmada. "
                       f"Verifica que la cuenta de servicio tenga el rol 'Service Account Token Creator'. Error: {e}", exc_info=True)
+        # Este error es importante. Si ocurre, la app no funcionará.
+        # Asegúrate de que las credenciales de servicio (el JSON) tienen el permiso IAM mencionado.
         raise
 
 def safe_json_parse(raw_text):
@@ -175,6 +180,7 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
         raise ValueError("La respuesta de la API de voz estaba vacía o no era un archivo de audio válido.")
 
     logging.info(f"Audio recibido de ElevenLabs. Tamaño: {len(response.content)} bytes.")
+    # Ahora esta función devuelve una URL firmada y segura.
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
 def _generate_script_and_prepare_structure_task(job_id, prompt_final):
@@ -339,7 +345,7 @@ def generate_full_audio():
     try:
         data = request.get_json()
         script = data.get('script')
-        voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f')
+        voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f') # ID de voz de ElevenLabs
         if not script or not script.strip():
             return jsonify({"error": "El guion es requerido"}), 400
         
@@ -347,6 +353,7 @@ def generate_full_audio():
         script_procesado = convertir_numeros_a_texto(script)
         logging.info(f"Guion procesado (números a texto) para ElevenLabs: '{script_procesado[:80]}...'")
         
+        # Esta función ahora devuelve una URL firmada.
         public_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
         return jsonify({"audioUrl": public_url})
     except Exception as e:
@@ -365,6 +372,8 @@ def generate_voice_sample():
         
         sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
         sample_text_procesado = convertir_numeros_a_texto(sample_text)
+        
+        # Esta función ahora devuelve una URL firmada.
         public_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
         return jsonify({"audioUrl": public_url})
     except Exception as e:
@@ -373,6 +382,4 @@ def generate_voice_sample():
 
 # --- 6. EJECUCIÓN DEL SERVIDOR ---
 if __name__ == '__main__':
-    from waitress import serve
-    port = int(os.environ.get('PORT', 5001))
-    serve(app, host='0.0.0.0', port=port)
+    from waitre
