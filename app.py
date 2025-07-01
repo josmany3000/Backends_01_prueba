@@ -37,7 +37,7 @@ if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
         logging.error("No se pudieron escribir las credenciales de GCP en el archivo temporal.", exc_info=True)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app) # Flask-CORS maneja las respuestas a OPTIONS, pero ser explícito en las rutas es más robusto
 
 # --- INICIALIZACIÓN DE REDIS ---
 REDIS_URL = os.getenv("REDIS_URL")
@@ -128,16 +128,13 @@ def _generate_and_upload_image(image_prompt, aspect_ratio):
         logging.error(f"Excepción en _generate_and_upload_image: {e}", exc_info=True)
         return None
 
-# --- FUNCIÓN DE AUDIO MEJORADA Y MÁS ROBUSTA ---
 def _generate_audio_with_elevenlabs(text_input, voice_id):
-    """Genera audio y verifica que la respuesta sea un archivo de audio válido."""
     tts_url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
     headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY}
     data = {"text": text_input, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}
     
     response = requests.post(tts_url, json=data, headers=headers)
 
-    # Verificación #1: Chequea el código de estado HTTP
     if not response.ok:
         error_details = ""
         try:
@@ -147,7 +144,6 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
         logging.error(f"Error en la API de ElevenLabs. Código: {response.status_code}. Detalles: {error_details}")
         response.raise_for_status()
 
-    # Verificación #2: Chequea que la respuesta sea realmente un audio y no esté vacía
     content_type = response.headers.get('Content-Type', '')
     if 'audio/mpeg' not in content_type or not response.content:
         logging.error(
@@ -196,13 +192,17 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v13.0 'Audio Robusto' - Estable"
+    return "Backend de IA para Videos v14.0 'CORS Fijo' - Estable"
 
-@app.route('/api/generate-initial-content', methods=['POST'])
+@app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
 def generate_initial_content():
     if not redis_client:
         return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
     
+    # Manejo de la petición pre-vuelo OPTIONS
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
     try:
         data = request.get_json()
         if not data or not data.get('userInput', '').strip():
@@ -278,8 +278,10 @@ def get_content_job_status(job_id):
     
     return jsonify(json.loads(job_data_str))
 
-@app.route('/api/regenerate-scene-part', methods=['POST'])
+@app.route('/api/regenerate-scene-part', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
 def regenerate_scene_part():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
     try:
         data = request.get_json()
         scene = data.get('scene')
@@ -311,8 +313,10 @@ def regenerate_scene_part():
         return jsonify({"error": f"Error interno al regenerar: {str(e)}"}), 500
     return jsonify({"error": "Parte no válida para regenerar."}), 400
 
-@app.route('/api/generate-full-audio', methods=['POST'])
+@app.route('/api/generate-full-audio', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
 def generate_full_audio():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
     try:
         data = request.get_json()
         script = data.get('script')
@@ -330,8 +334,10 @@ def generate_full_audio():
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
         return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 502
 
-@app.route('/api/voice-sample', methods=['POST'])
+@app.route('/api/voice-sample', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
 def generate_voice_sample():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
     try:
         data = request.get_json()
         voice_id = data.get('voice')
@@ -351,4 +357,4 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-    
+        
