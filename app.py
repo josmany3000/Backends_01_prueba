@@ -6,6 +6,7 @@ import logging
 import time
 import re
 import threading
+import datetime  # <-- DEPENDENCIA AÑADIDA
 from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -37,7 +38,7 @@ if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
         logging.error("No se pudieron escribir las credenciales de GCP en el archivo temporal.", exc_info=True)
 
 app = Flask(__name__)
-CORS(app) # Flask-CORS maneja las respuestas a OPTIONS, pero ser explícito en las rutas es más robusto
+CORS(app)
 
 # --- INICIALIZACIÓN DE REDIS ---
 REDIS_URL = os.getenv("REDIS_URL")
@@ -86,12 +87,31 @@ def convertir_numeros_a_texto(texto):
         return texto
     return re.sub(r'\d+', lambda match: num2words(int(match.group(0)), lang='es'), texto)
 
+# --- FUNCIÓN DE SUBIDA A GCS ACTUALIZADA PARA USAR URLS FIRMADAS ---
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
+    """Sube un archivo a GCS y devuelve una URL firmada de corta duración."""
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
+    
+    logging.info(f"Subiendo {len(file_stream)} bytes a GCS en {destination_blob_name}...")
     blob.upload_from_string(file_stream, content_type=content_type)
-    blob.make_public()
-    return blob.public_url
+    logging.info("Subida completada.")
+
+    # Genera una URL firmada que expira en 30 minutos.
+    # Esto es más seguro y fiable que hacer el objeto público.
+    expiration_time = datetime.timedelta(minutes=30)
+    try:
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=expiration_time,
+            method="GET"
+        )
+        logging.info("URL firmada generada exitosamente.")
+        return signed_url
+    except Exception as e:
+        logging.error(f"¡FALLO CRÍTICO! No se pudo generar la URL firmada. "
+                      f"Verifica que la cuenta de servicio tenga el rol 'Service Account Token Creator'. Error: {e}", exc_info=True)
+        raise
 
 def safe_json_parse(raw_text):
     logging.info("Iniciando parseo de JSON robusto.")
@@ -154,7 +174,7 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
         )
         raise ValueError("La respuesta de la API de voz estaba vacía o no era un archivo de audio válido.")
 
-    logging.info(f"Audio recibido de ElevenLabs. Tamaño: {len(response.content)} bytes. Subiendo a GCS...")
+    logging.info(f"Audio recibido de ElevenLabs. Tamaño: {len(response.content)} bytes.")
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
 def _generate_script_and_prepare_structure_task(job_id, prompt_final):
@@ -192,17 +212,16 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v14.0 'CORS Fijo' - Estable"
+    return "Backend de IA para Videos v15.0 'URLs Firmadas' - Estable"
 
-@app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
+@app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS'])
 def generate_initial_content():
-    if not redis_client:
-        return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
-    
-    # Manejo de la petición pre-vuelo OPTIONS
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
 
+    if not redis_client:
+        return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
+    
     try:
         data = request.get_json()
         if not data or not data.get('userInput', '').strip():
@@ -278,7 +297,7 @@ def get_content_job_status(job_id):
     
     return jsonify(json.loads(job_data_str))
 
-@app.route('/api/regenerate-scene-part', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
+@app.route('/api/regenerate-scene-part', methods=['POST', 'OPTIONS'])
 def regenerate_scene_part():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
@@ -313,7 +332,7 @@ def regenerate_scene_part():
         return jsonify({"error": f"Error interno al regenerar: {str(e)}"}), 500
     return jsonify({"error": "Parte no válida para regenerar."}), 400
 
-@app.route('/api/generate-full-audio', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
+@app.route('/api/generate-full-audio', methods=['POST', 'OPTIONS'])
 def generate_full_audio():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
@@ -334,7 +353,7 @@ def generate_full_audio():
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
         return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 502
 
-@app.route('/api/voice-sample', methods=['POST', 'OPTIONS']) # <-- SE AÑADIÓ 'OPTIONS'
+@app.route('/api/voice-sample', methods=['POST', 'OPTIONS'])
 def generate_voice_sample():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
@@ -357,4 +376,3 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-        
