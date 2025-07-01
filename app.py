@@ -15,6 +15,7 @@ from google.cloud import storage
 import vertexai
 from vertexai.vision_models import ImageGenerationModel
 import redis
+from num2words import num2words # <-- DEPENDENCIA AÑADIDA
 
 # --- 1. CONFIGURACIÓN INICIAL Y VALIDACIÓN ---
 load_dotenv()
@@ -45,13 +46,12 @@ if not REDIS_URL:
     redis_client = None
 else:
     try:
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True) # decode_responses=True es útil
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
         logging.info("Conexión con Redis establecida exitosamente.")
     except Exception as e:
         logging.critical(f"No se pudo conectar a Redis: {e}", exc_info=True)
         redis_client = None
 
-# ---- El resto de la configuración se mantiene igual ----
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -69,8 +69,6 @@ try:
 except Exception:
     logging.critical("ERROR FATAL AL CONFIGURAR CLIENTES DE GOOGLE.", exc_info=True)
 
-# --- CORRECCIÓN DE PROMPTS ---
-# Se han hecho las instrucciones más estrictas y directas para mejorar la calidad del resultado.
 PROMPTS_POR_NICHO = {
     "misterio_terror": "**GANCHO INICIAL OBLIGATORIO:** La primera frase de la primera escena DEBE ser una pregunta que empiece con '¿Sabías que...?', '¿Te has preguntado alguna vez...?' o '¿Qué pasaría si te dijera que...?'. Es un requisito indispensable. A continuación, desarrolla una narración de suspenso y terror sobre un evento inexplicable, usando un tono oscuro y generando tensión.",
     "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento, o un tema financiero que esté en tendencias. Utiliza un tono motivador, claro y profesional. Incluye datos curiosos, estrategias prácticas y consejos para emprendedores modernos.",
@@ -83,26 +81,18 @@ PROMPTS_POR_NICHO = {
     "anime_manga": "Crea una narración apasionada sobre un anime o manga popular o una historia original inspirada en ese estilo. Usa un tono épico, emocional y juvenil. Incluye referencias al estilo narrativo japonés, con dramatismo y acción."
 }
 
-def retry_on_failure(retries=3, delay=5, backoff=2):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            current_delay = delay
-            for i in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if "response was blocked" in str(e) or isinstance(e, IndexError):
-                        logging.error(f"Error irrecuperable en {func.__name__}. No se reintentará. Causa probable: contenido bloqueado por la API.")
-                        raise e
-                    logging.warning(f"Intento {i + 1}/{retries} para {func.__name__} falló: {e}. Reintentando en {current_delay}s...")
-                    if i == retries - 1:
-                        logging.error(f"Todos los {retries} intentos para {func.__name__} fallaron.", exc_info=True)
-                        raise e
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-        return wrapper
-    return decorator
+# --- NUEVA FUNCIÓN AUXILIAR PARA CORREGIR AUDIO ---
+def convertir_numeros_a_texto(texto):
+    """
+    Busca todos los números en un texto y los convierte a palabras en español.
+    Ejemplo: "En 1945, se encontraron 3 objetos." -> "En mil novecientos cuarenta y cinco, se encontraron tres objetos."
+    """
+    if not texto:
+        return texto
+    
+    # Usamos re.sub con una función lambda para reemplazar cada número encontrado
+    # \d+ coincide con una o más secuencias de dígitos
+    return re.sub(r'\d+', lambda match: num2words(int(match.group(0)), lang='es'), texto)
 
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
     bucket = storage_client.bucket(GCS_BUCKET_NAME)
@@ -156,14 +146,12 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
     response.raise_for_status()
     return upload_to_gcs(response.content, f"audio/audio_{uuid.uuid4()}.mp3", 'audio/mpeg')
 
-# --- CORRECCIÓN PARA RAPIDEZ: TAREA DE FONDO ---
-# Esta función ahora contiene la lógica lenta (llamar a la IA) y se ejecutará en segundo plano.
 def _generate_script_and_prepare_structure_task(job_id, prompt_final):
     def update_job_status(status, data=None, error=None):
         job_data = {"status": status}
         if data: job_data["result"] = data
         if error: job_data["error"] = error
-        redis_client.set(job_id, json.dumps(job_data), ex=3600) # El trabajo expira en 1 hora
+        redis_client.set(job_id, json.dumps(job_data), ex=3600)
 
     try:
         logging.info(f"Trabajo {job_id}: Iniciando generación de guion con IA en segundo plano.")
@@ -191,10 +179,9 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
         logging.error(f"Trabajo {job_id} falló durante la generación en segundo plano: {e}", exc_info=True)
         update_job_status("error", error=str(e))
 
-# --- ENDPOINTS DE LA API ---
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v11.0 'Asíncrono' - Estable"
+    return "Backend de IA para Videos v12.0 'Consistente y Claro' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST'])
 def generate_initial_content():
@@ -206,8 +193,6 @@ def generate_initial_content():
         if not data or not data.get('userInput', '').strip():
             return jsonify({"error": "El cuerpo de la solicitud es inválido o el campo de tema está vacío."}), 400
 
-        # --- CORRECCIÓN DE PROMPTS Y REGLAS ---
-        # Se ha hecho la instrucción del CTA más específica y obligatoria.
         output_format_instructions = """
         FORMATO DE SALIDA OBLIGATORIO:
         1. Tu respuesta DEBE SER ÚNICAMENTE un objeto JSON válido, sin texto adicional antes o después.
@@ -225,8 +210,6 @@ def generate_initial_content():
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
         prompt_final = ""
-        # --- CORRECCIÓN DE PROMPTS Y REGLAS ---
-        # El CTA ahora es una regla explícita y directa para la IA.
         cta_instruction = "La última escena DEBE ser exclusivamente un llamado a la acción (CTA) claro y directo. Pide al espectador que 'se suscriba', 'deje un like' y 'siga el canal para más contenido como este'."
 
         if data.get('tipoEntrada') == 'guion':
@@ -242,29 +225,28 @@ def generate_initial_content():
             instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
             palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
             palabras_por_escena = int(palabras_totales // numero_de_escenas)
+            # --- PROMPT MEJORADO PARA DAR CONSISTENCIA ---
             prompt_template_tema = f"""
             ROL: Eres un guionista experto para el nicho '{nicho}'.
-            TAREA: Crea un guion sobre "{userInput}" en {idioma}.
-            REGLAS:
+            TAREA: Crea un guion sobre el tema principal: "{userInput}".
+            IDIOMA: {idioma}.
+            REGLAS OBLIGATORIAS:
             1. {instruccion_base}
             2. Genera EXACTAMENTE {numero_de_escenas} escenas. Cada una con aprox. {palabras_por_escena} palabras.
             3. {cta_instruction}
+            4. **CONSISTENCIA NARRATIVA CRÍTICA:** Toda la historia, de principio a fin, debe centrarse en UN ÚNICO tema, evento o lugar basado estrictamente en el tema principal proporcionado ("{userInput}"). NO introduzcas otros temas, lugares o anécdotas no relacionadas en las escenas. Mantén una sola línea narrativa coherente.
             {output_format_instructions.format(idioma=idioma)}
             """
             prompt_final = prompt_template_tema
         
-        # --- CORRECCIÓN PARA RAPIDEZ: EJECUCIÓN ASÍNCRONA ---
-        # Ahora, en lugar de esperar, creamos un trabajo y lo iniciamos en segundo plano.
         job_id = str(uuid.uuid4())
         initial_job_data = {"status": "pending", "jobId": job_id}
         redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
-        # Inicia el hilo que hará el trabajo pesado.
         thread = threading.Thread(target=_generate_script_and_prepare_structure_task, args=(job_id, prompt_final))
         thread.start()
         
         logging.info(f"Trabajo {job_id} creado y enviado a segundo plano. Devolviendo respuesta inmediata.")
-        # Devolvemos el ID del trabajo inmediatamente para que el cliente pueda consultar el estado.
         return jsonify({"jobId": job_id})
 
     except Exception as e:
@@ -282,7 +264,6 @@ def get_content_job_status(job_id):
     
     return jsonify(json.loads(job_data_str))
 
-# --- El resto de los endpoints no requieren cambios para estas correcciones ---
 @app.route('/api/regenerate-scene-part', methods=['POST'])
 def regenerate_scene_part():
     try:
@@ -324,7 +305,14 @@ def generate_full_audio():
         voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f')
         if not script or not script.strip():
             return jsonify({"error": "El guion es requerido"}), 400
-        public_url = _generate_audio_with_elevenlabs(script, voice_id)
+        
+        # --- CORRECCIÓN DE AUDIO APLICADA AQUÍ ---
+        # Se convierte el guion con números a un guion con palabras antes de enviarlo a la API de voz.
+        logging.info(f"Guion original recibido: '{script[:80]}...'")
+        script_procesado = convertir_numeros_a_texto(script)
+        logging.info(f"Guion procesado (números a texto) para ElevenLabs: '{script_procesado[:80]}...'")
+        
+        public_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
         return jsonify({"audioUrl": public_url})
     except Exception as e:
         logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
@@ -339,7 +327,9 @@ def generate_voice_sample():
             return jsonify({"error": "Se requiere un ID de voz"}), 400
         
         sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
-        public_url = _generate_audio_with_elevenlabs(sample_text, voice_id)
+        # La muestra no tiene números, pero es buena práctica usar la función por si acaso.
+        sample_text_procesado = convertir_numeros_a_texto(sample_text)
+        public_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
         return jsonify({"audioUrl": public_url})
     except Exception as e:
         logging.error("Error al generar muestra de voz: %s", e)
@@ -350,4 +340,3 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-    
