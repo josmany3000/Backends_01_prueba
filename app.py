@@ -87,22 +87,12 @@ def convertir_numeros_a_texto(texto):
     return re.sub(r'\d+', lambda match: num2words(int(match.group(0)), lang='es'), texto)
 
 def upload_to_gcs(file_stream, destination_blob_name, content_type):
-    """
-    Sube un archivo a GCS como objeto PÚBLICO y devuelve su URL pública permanente.
-    """
     try:
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
         blob = bucket.blob(destination_blob_name)
-        
         logging.info(f"Subiendo {len(file_stream)} bytes a GCS en {destination_blob_name}...")
-        
-        # Sube el objeto. Los permisos de lectura pública se heredan del bucket
-        # o se pueden forzar con `predefined_acl='publicRead'`.
         blob.upload_from_string(file_stream, content_type=content_type)
-        
         logging.info(f"Subida completada. URL pública: {blob.public_url}")
-        
-        # Devuelve la URL pública y permanente del objeto.
         return blob.public_url
     except Exception as e:
         logging.error(f"¡FALLO CRÍTICO! No se pudo subir el archivo a GCS. Error: {e}", exc_info=True)
@@ -164,8 +154,7 @@ def _generate_audio_with_elevenlabs(text_input, voice_id):
         logging.error(
             f"La API de ElevenLabs no devolvió un archivo de audio válido. "
             f"Content-Type recibido: '{content_type}', "
-            f"Tamaño del contenido: {len(response.content)} bytes. "
-            f"Esto puede indicar que se ha agotado la cuota de caracteres o un problema de la API."
+            f"Tamaño del contenido: {len(response.content)} bytes."
         )
         raise ValueError("La respuesta de la API de voz estaba vacía o no era un archivo de audio válido.")
 
@@ -207,7 +196,7 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v16.0 'URLs Públicas' - Estable"
+    return "Backend de IA para Videos v17.0 'Validación Estricta' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS'])
 def generate_initial_content():
@@ -232,13 +221,21 @@ def generate_initial_content():
         REGLA CRÍTICA: Si dentro de "script" usas comillas dobles ("), DEBES escaparlas con una barra invertida (\\").
         """
         
-        nicho = data.get('nicho', 'documentales')
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 1. Se elimina el respaldo. Ahora se valida que el nicho exista.
+        nicho = data.get('nicho')
+        if not nicho or nicho not in PROMPTS_POR_NICHO:
+            logging.error(f"Se recibió un nicho inválido o no existente: '{nicho}'")
+            return jsonify({"error": f"El nicho '{nicho}' no es válido o no fue proporcionado."}), 400
+        # --- FIN DE LA MODIFICACIÓN ---
+
         userInput = data.get('userInput')
         idioma = data.get('idioma', 'Español Latinoamericano')
         duracion_a_escenas = {"50": 4, "120": 6, "180": 8, "300": 10, "600": 15}
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
         prompt_final = ""
+        # La instrucción del CTA (Llamado a la acción) se define aquí
         cta_instruction = "La última escena DEBE ser exclusivamente un llamado a la acción (CTA) claro y directo. Pide al espectador que 'se suscriba', 'deje un like' y 'siga el canal para más contenido como este'."
 
         if data.get('tipoEntrada') == 'guion':
@@ -251,9 +248,11 @@ def generate_initial_content():
             """
             prompt_final = prompt_template_guion
         else:
-            instruccion_base = PROMPTS_POR_NICHO.get(nicho, PROMPTS_POR_NICHO['documentales'])
+            # Se obtiene la instrucción base del nicho validado
+            instruccion_base = PROMPTS_POR_NICHO[nicho]
             palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
             palabras_por_escena = int(palabras_totales // numero_de_escenas)
+            
             prompt_template_tema = f"""
             ROL: Eres un guionista experto para el nicho '{nicho}'.
             TAREA: Crea un guion sobre el tema principal: "{userInput}".
@@ -261,10 +260,16 @@ def generate_initial_content():
             REGLAS OBLIGATORIAS:
             1. {instruccion_base}
             2. Genera EXACTAMENTE {numero_de_escenas} escenas. Cada una con aprox. {palabras_por_escena} palabras.
-            3. {cta_instruction}
-            4. **CONSISTENCIA NARRATIVA CRÍTICA:** Toda la historia, de principio a fin, debe centrarse en UN ÚNICO tema, evento o lugar basado estrictamente en el tema principal proporcionado ("{userInput}"). NO introduzcas otros temas, lugares o anécdotas no relacionadas en las escenas. Mantén una sola línea narrativa coherente.
-            {output_format_instructions.format(idioma=idioma)}
+            3. **CONSISTENCIA NARRATIVA CRÍTICA:** Toda la historia, de principio a fin, debe centrarse en UN ÚNICO tema, evento o lugar basado estrictamente en el tema principal proporcionado ("{userInput}"). NO introduzcas otros temas, lugares o anécdotas no relacionadas en las escenas. Mantén una sola línea narrativa coherente.
             """
+
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # 2. Se añade el CTA a todos los nichos EXCEPTO a 'misterio_terror'
+            if nicho != 'misterio_terror':
+                prompt_template_tema += f"\n4. {cta_instruction}"
+            # --- FIN DE LA MODIFICACIÓN ---
+
+            prompt_template_tema += f"\n{output_format_instructions.format(idioma=idioma)}"
             prompt_final = prompt_template_tema
         
         job_id = str(uuid.uuid4())
@@ -378,4 +383,4 @@ if __name__ == '__main__':
     from waitress import serve
     port = int(os.environ.get('PORT', 5001))
     serve(app, host='0.0.0.0', port=port)
-        
+    
