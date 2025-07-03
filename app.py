@@ -169,7 +169,7 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
         redis_client.set(job_id, json.dumps(job_data), ex=3600)
 
     try:
-        logging.info(f"Trabajo {job_id}: Iniciando generación de guion con IA en segundo plano.")
+        logging.info(f"Trabajo de guion {job_id}: Iniciando generación en segundo plano.")
         update_job_status("processing")
 
         response = model_text.generate_content(prompt_final)
@@ -188,15 +188,47 @@ def _generate_script_and_prepare_structure_task(job_id, prompt_final):
             scene['videoUrl'] = None
 
         update_job_status("completed", data={"scenes": scenes})
-        logging.info(f"Trabajo {job_id}: Proceso completado y guardado en Redis.")
+        logging.info(f"Trabajo de guion {job_id}: Proceso completado y guardado en Redis.")
 
     except Exception as e:
-        logging.error(f"Trabajo {job_id} falló durante la generación en segundo plano: {e}", exc_info=True)
+        logging.error(f"Trabajo de guion {job_id} falló durante la generación en segundo plano: {e}", exc_info=True)
         update_job_status("error", error=str(e))
+
+# ======================================================
+# == INICIO: NUEVA FUNCIÓN PARA TAREAS DE AUDIO ASÍNCRONAS ==
+# ======================================================
+def _generate_audio_task(job_id, script, voice_id):
+    def update_job_status(status, data=None, error=None):
+        job_data = {"status": status}
+        if data: job_data["result"] = data
+        if error: job_data["error"] = error
+        if redis_client:
+            redis_client.set(job_id, json.dumps(job_data), ex=3600)
+
+    try:
+        logging.info(f"Trabajo de audio {job_id}: Iniciando generación en segundo plano.")
+        update_job_status("processing")
+
+        script_procesado = convertir_numeros_a_texto(script)
+        logging.info(f"Trabajo {job_id}: Guion procesado para ElevenLabs: '{script_procesado[:80]}...'")
+        
+        audio_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
+        if not audio_url:
+            raise Exception("La función _generate_audio_with_elevenlabs no devolvió una URL.")
+
+        update_job_status("completed", data={"audioUrl": audio_url})
+        logging.info(f"Trabajo de audio {job_id}: Proceso completado. URL guardada en Redis.")
+
+    except Exception as e:
+        logging.error(f"Trabajo de audio {job_id} falló: {e}", exc_info=True)
+        update_job_status("error", error=f"No se pudo generar el audio: {str(e)}")
+# ====================================================
+# == FIN: NUEVA FUNCIÓN PARA TAREAS DE AUDIO ASÍNCRONAS ==
+# ====================================================
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v17.0 'Validación Estricta' - Estable"
+    return "Backend de IA para Videos v18.0 'Audio Asíncrono' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS'])
 def generate_initial_content():
@@ -221,13 +253,10 @@ def generate_initial_content():
         REGLA CRÍTICA: Si dentro de "script" usas comillas dobles ("), DEBES escaparlas con una barra invertida (\\").
         """
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # 1. Se elimina el respaldo. Ahora se valida que el nicho exista.
         nicho = data.get('nicho')
         if not nicho or nicho not in PROMPTS_POR_NICHO:
             logging.error(f"Se recibió un nicho inválido o no existente: '{nicho}'")
             return jsonify({"error": f"El nicho '{nicho}' no es válido o no fue proporcionado."}), 400
-        # --- FIN DE LA MODIFICACIÓN ---
 
         userInput = data.get('userInput')
         idioma = data.get('idioma', 'Español Latinoamericano')
@@ -235,7 +264,6 @@ def generate_initial_content():
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
         prompt_final = ""
-        # La instrucción del CTA (Llamado a la acción) se define aquí
         cta_instruction = "La última escena DEBE ser exclusivamente un llamado a la acción (CTA) claro y directo. Pide al espectador que 'se suscriba', 'deje un like' y 'siga el canal para más contenido como este'."
 
         if data.get('tipoEntrada') == 'guion':
@@ -248,7 +276,6 @@ def generate_initial_content():
             """
             prompt_final = prompt_template_guion
         else:
-            # Se obtiene la instrucción base del nicho validado
             instruccion_base = PROMPTS_POR_NICHO[nicho]
             palabras_totales = int(data.get('duracionVideo', 50)) * 2.8
             palabras_por_escena = int(palabras_totales // numero_de_escenas)
@@ -263,23 +290,20 @@ def generate_initial_content():
             3. **CONSISTENCIA NARRATIVA CRÍTICA:** Toda la historia, de principio a fin, debe centrarse en UN ÚNICO tema, evento o lugar basado estrictamente en el tema principal proporcionado ("{userInput}"). NO introduzcas otros temas, lugares o anécdotas no relacionadas en las escenas. Mantén una sola línea narrativa coherente.
             """
 
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # 2. Se añade el CTA a todos los nichos EXCEPTO a 'misterio_terror'
             if nicho != 'misterio_terror':
                 prompt_template_tema += f"\n4. {cta_instruction}"
-            # --- FIN DE LA MODIFICACIÓN ---
 
             prompt_template_tema += f"\n{output_format_instructions.format(idioma=idioma)}"
             prompt_final = prompt_template_tema
         
-        job_id = str(uuid.uuid4())
+        job_id = f"script_{uuid.uuid4()}" # Prefijo para claridad
         initial_job_data = {"status": "pending", "jobId": job_id}
         redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
         thread = threading.Thread(target=_generate_script_and_prepare_structure_task, args=(job_id, prompt_final))
         thread.start()
         
-        logging.info(f"Trabajo {job_id} creado y enviado a segundo plano. Devolviendo respuesta inmediata.")
+        logging.info(f"Trabajo de guion {job_id} creado y enviado a segundo plano.")
         return jsonify({"jobId": job_id})
 
     except Exception as e:
@@ -332,55 +356,35 @@ def regenerate_scene_part():
         return jsonify({"error": f"Error interno al regenerar: {str(e)}"}), 500
     return jsonify({"error": "Parte no válida para regenerar."}), 400
 
+# ======================================================
+# == INICIO: RUTA DE AUDIO ACTUALIZADA PARA SER ASÍNCRONA ==
+# ======================================================
 @app.route('/api/generate-full-audio', methods=['POST', 'OPTIONS'])
 def generate_full_audio():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
+    
+    if not redis_client:
+        return jsonify({"error": "El servicio de estado (Redis) no está disponible."}), 503
+
     try:
         data = request.get_json()
         script = data.get('script')
-        voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f') # ID de voz de ElevenLabs
+        voice_id = data.get('voice', 'Wl3O9lmFSMgGFTTwuS6f')
+
         if not script or not script.strip():
             return jsonify({"error": "El guion es requerido"}), 400
         
-        logging.info(f"Guion original recibido para audio: '{script[:80]}...'")
-        script_procesado = convertir_numeros_a_texto(script)
-        logging.info(f"Guion procesado (números a texto) para ElevenLabs: '{script_procesado[:80]}...'")
+        job_id = f"audio_{uuid.uuid4()}" # Prefijo para claridad
+        initial_job_data = {"status": "pending", "jobId": job_id}
+        redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
-        audio_url = _generate_audio_with_elevenlabs(script_procesado, voice_id)
-        if not audio_url:
-            raise Exception("La función _generate_audio_with_elevenlabs no devolvió una URL.")
+        # Iniciar la tarea en un hilo separado
+        thread = threading.Thread(target=_generate_audio_task, args=(job_id, script, voice_id))
+        thread.start()
+        
+        logging.info(f"Trabajo de audio {job_id} creado.")
+        return jsonify({"jobId": job_id})
 
-        return jsonify({"audioUrl": audio_url})
     except Exception as e:
-        logging.error(f"Error en generate_full_audio: {e}", exc_info=True)
-        return jsonify({"error": f"No se pudo generar el audio: {str(e)}"}), 502
-
-@app.route('/api/voice-sample', methods=['POST', 'OPTIONS'])
-def generate_voice_sample():
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'}), 200
-    try:
-        data = request.get_json()
-        voice_id = data.get('voice')
-        if not voice_id:
-            return jsonify({"error": "Se requiere un ID de voz"}), 400
-        
-        sample_text = "Hola, esta es una prueba de la voz seleccionada para la narración."
-        sample_text_procesado = convertir_numeros_a_texto(sample_text)
-        
-        audio_url = _generate_audio_with_elevenlabs(sample_text_procesado, voice_id)
-        if not audio_url:
-            raise Exception("La función _generate_audio_with_elevenlabs no devolvió una URL para la muestra.")
-            
-        return jsonify({"audioUrl": audio_url})
-    except Exception as e:
-        logging.error("Error al generar muestra de voz: %s", e)
-        return jsonify({"error": f"No se pudo generar la muestra de voz: {str(e)}"}), 502
-
-# --- 6. EJECUCIÓN DEL SERVIDOR ---
-if __name__ == '__main__':
-    from waitress import serve
-    port = int(os.environ.get('PORT', 5001))
-    serve(app, host='0.0.0.0', port=port)
-    
+        logging
