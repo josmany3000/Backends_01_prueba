@@ -70,22 +70,25 @@ except Exception:
     logging.critical("ERROR FATAL AL CONFIGURAR CLIENTES DE GOOGLE.", exc_info=True)
 
 # =================================================================================
-# == INICIO: BLOQUE DE PROMPTS ACTUALIZADO CON NUEVAS REGLAS DE VERACIDAD Y CTA ==
+# == INICIO: DICCIONARIO DE PROMPTS ACTUALIZADO CON REGLAS DE VERACIDAD Y CTA    ==
 # =================================================================================
+REGLA_DE_VERACIDAD = "REGLA DE VERACIDAD CRÍTICA: Basa toda la información en hechos reales y bien documentados de fuentes confiables. Si el tema es una leyenda, un mito o una teoría, DEBES especificarlo claramente en el guion diciendo frases como 'según la leyenda...' o 'la teoría postula que...'. NO inventes eventos ni datos presentándolos como hechos."
+
 PROMPTS_POR_NICHO = {
-    "misterio_terror": "GANCHO OBLIGATORIO: La primera frase de la primera escena DEBE empezar con '¿Sabías que...?'. TAREA: Desarrolla una narración de suspenso y terror. REGLA DE VERACIDAD CRÍTICA: Basa la historia en hechos reales y documentados. Si el tema es una leyenda o mito, DEBES especificarlo claramente diciendo 'cuenta la leyenda que...' o una frase similar. NO inventes eventos trágicos como si fueran noticias. Usa un tono oscuro y genera tensión.",
-    "finanzas_emprendimiento": "Redacta una narración inspiradora sobre una historia de éxito financiero o de emprendimiento. REGLA DE VERACIDAD CRÍTICA: Utiliza únicamente datos, cifras y hechos reales y verificables. Incluye consejos prácticos con un tono motivador, claro y profesional.",
-    "tecnologia_ia": "Genera una narración informativa y futurista sobre un avance en IA o tecnología. REGLA DE VERACIDAD CRÍTICA: Basa la información en investigaciones y anuncios de fuentes oficiales. El estilo debe ser didáctico, emocionante y accesible, con ejemplos reales.",
-    "documentales": "Escribe una narración objetiva, informativa y neutral sobre un tema social, cultural o histórico. REGLA DE VERACIDAD CRÍTICA: El guion debe estar enfocado exclusivamente en hechos, fechas y análisis profundos y documentados. El tono debe ser serio y documental.",
-    "biblia_cristianismo": "Redacta una narración inspiradora basada en pasajes bíblicos, reflexiones o historias de fe. REGLA DE VERACIDAD CRÍTICA: Sé fiel a los textos bíblicos o a las doctrinas cristianas aceptadas. Usa un tono respetuoso, cálido y espiritual, transmitiendo esperanza y enseñanzas morales.",
-    "aliens_teorias": "Crea una narración intrigante sobre una teoría conspirativa o un caso de contacto extraterrestre. REGLA DE VERACIDAD CRÍTICA: Especifica SIEMPRE que se trata de teorías o casos no confirmados. Usa frases como 'Según los teóricos...' o 'El famoso caso sin resolver de...'. NO lo presentes como un hecho confirmado. Mantén un tono misterioso y especulativo.",
-    "tendencias_virales": "Genera una narración dinámica y moderna sobre una tendencia viral REAL y actual. REGLA DE VERACIDAD CRÍTICA: Describe la tendencia tal como ocurrió, citando su origen si es conocido. Usa un tono divertido, acelerado y con lenguaje juvenil, incluyendo contexto relevante.",
-    "politica": "Redacta una narración seria y analítica sobre un tema político actual. REGLA DE VERACIDAD CRÍTICA: Cita únicamente hechos, estadísticas y datos de fuentes confiables. Explica el contexto de manera clara, imparcial y profunda.",
-    "anime_manga": "Crea una narración apasionada sobre un anime o manga. REGLA DE VERACIDAD CRÍTICA: Basa la narración estrictamente en la trama, personajes y lore oficial del anime/manga en cuestión. No inventes detalles de la historia. Usa un tono épico, emocional y juvenil."
+    "misterio_terror": f"**GANCHO INICIAL OBLIGATORIO:** La primera frase de la primera escena DEBE empezar obligatoriamente con '¿Sabías que...?'. A continuación, desarrolla una narración de suspenso y terror. {REGLA_DE_VERACIDAD}",
+    "finanzas_emprendimiento": f"Redacta una narración inspiradora sobre una historia de éxito financiero, de emprendimiento o un tema financiero en tendencia. Utiliza un tono motivador y profesional. {REGLA_DE_VERACIDAD}",
+    "tecnologia_ia": f"Genera una narración informativa y futurista sobre un avance en IA o tecnología, investigando en fuentes oficiales. El estilo debe ser didáctico y accesible. {REGLA_DE_VERACIDAD}",
+    "documentales": f"Escribe una narración estrictamente objetiva, informativa y neutral sobre un tema social, cultural o histórico. El tono debe ser serio y documental, con un enfoque absoluto en hechos, fechas y análisis. {REGLA_DE_VERACIDAD}",
+    "biblia_cristianismo": f"Redacta una narración inspiradora basada en pasajes bíblicos o reflexiones cristianas. Usa un tono respetuoso y espiritual. Basa la narración en interpretaciones teológicas aceptadas y no inventes hechos. {REGLA_DE_VERACIDAD}",
+    "aliens_teorias": f"Crea una narración intrigante sobre una teoría conspirativa o un caso de contacto extraterrestre. Usa un estilo misterioso y especulativo. {REGLA_DE_VERACIDAD}",
+    "tendencias_virales": f"Genera una narración dinámica sobre una tendencia viral actual. Explica el origen y contexto real de la tendencia. Usa un tono divertido y moderno. {REGLA_DE_VERACIDAD}",
+    "politica": f"Redacta una narración seria y crítica sobre un tema político actual, usando un tono imparcial pero analítico. Cita hechos, estadísticas y consecuencias verificables. {REGLA_DE_VERACIDAD}",
+    "anime_manga": f"Crea una narración apasionada sobre un anime, manga o su creador. Basa la información en la trama oficial de la obra o en datos biográficos confirmados. {REGLA_DE_VERACIDAD}"
 }
-# ===============================================================================
-# == FIN: BLOQUE DE PROMPTS ACTUALIZADO                                        ==
-# ===============================================================================
+# =================================================================================
+# == FIN: DICCIONARIO DE PROMPTS ACTUALIZADO                                    ==
+# =================================================================================
+
 
 def convertir_numeros_a_texto(texto):
     if not texto:
@@ -264,8 +267,13 @@ def generate_initial_content():
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
         prompt_final = ""
-        # REGLA DE CTA ACTUALIZADA Y APLICADA A TODOS
-        cta_instruction = "REGLA DE CIERRE OBLIGATORIA: La última escena DEBE ser exclusivamente un llamado a la acción (CTA). Pide al espectador que se suscriba, deje un like y te siga en todas las redes sociales para no perderse más contenido como este."
+        # =================================================================
+        # == INICIO: INSTRUCCIÓN DE CTA ACTUALIZADA Y HECHA GLOBAL       ==
+        # =================================================================
+        cta_instruction = "La última escena DEBE ser exclusivamente un llamado a la acción (CTA) claro y directo. Pide al espectador que 'nos siga en todas nuestras redes sociales para no perderse más contenido como este'."
+        # =================================================================
+        # == FIN: INSTRUCCIÓN DE CTA ACTUALIZADA Y HECHA GLOBAL         ==
+        # =================================================================
 
         if data.get('tipoEntrada') == 'guion':
             prompt_template_guion = f"""
@@ -288,13 +296,14 @@ def generate_initial_content():
             REGLAS OBLIGATORIAS:
             1. {instruccion_base}
             2. Genera EXACTAMENTE {numero_de_escenas} escenas. Cada una con aprox. {palabras_por_escena} palabras.
-            3. {cta_instruction}
-            4. **CONSISTENCIA NARRATIVA CRÍTICA:** Toda la historia, de principio a fin, debe centrarse en UN ÚNICO tema, evento o lugar basado estrictamente en el tema principal proporcionado ("{userInput}"). NO introduzcas otros temas, lugares o anécdotas no relacionadas.
+            3. CONSISTENCIA NARRATIVA CRÍTICA: Toda la historia debe centrarse en UN ÚNICO tema basado en "{userInput}". NO introduzcas temas no relacionados.
+            4. {cta_instruction}
+            
             {output_format_instructions.format(idioma=idioma)}
             """
             prompt_final = prompt_template_tema
         
-        job_id = f"script_{uuid.uuid4()}"
+        job_id = f"script_{uuid.uuid4()}" 
         initial_job_data = {"status": "pending", "jobId": job_id}
         redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
@@ -332,7 +341,7 @@ def regenerate_scene_part():
             return jsonify({"error": "Faltan datos en la solicitud"}), 400
         
         if part_to_regenerate == 'script':
-            prompt = f"Reformula este texto de forma creativa y concisa, en Español Latinoamericano, manteniendo los hechos o datos originales: '{scene.get('script')}'"
+            prompt = f"Reformula este texto de forma creativa y concisa, en Español Latinoamericano, manteniendo la idea central: '{scene.get('script')}'"
             response = model_text.generate_content(prompt)
             return jsonify({"newScript": response.text.strip().replace("`", "")})
         
@@ -374,4 +383,11 @@ def generate_full_audio():
         initial_job_data = {"status": "pending", "jobId": job_id}
         redis_client.set(job_id, json.dumps(initial_job_data), ex=3600)
         
-        thread = threading.Thread(target=_generate_audio_task, arg
+        thread = threading.Thread(target=_generate_audio_task, args=(job_id, script, voice_id))
+        thread.start()
+        
+        logging.info(f"Trabajo de audio {job_id} creado.")
+        return jsonify({"jobId": job_id})
+
+    except Exception as e:
+        logging.error(f"Error fatal en la generación de audio: {e}", exc_info
