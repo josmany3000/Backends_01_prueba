@@ -69,9 +69,6 @@ try:
 except Exception:
     logging.critical("ERROR FATAL AL CONFIGURAR CLIENTES DE GOOGLE.", exc_info=True)
 
-# =================================================================================
-# == INICIO: DICCIONARIO DE PROMPTS ACTUALIZADO CON REGLAS DE VERACIDAD Y CTA    ==
-# =================================================================================
 REGLA_DE_VERACIDAD = "REGLA DE VERACIDAD CRÍTICA: Basa toda la información en hechos reales y bien documentados de fuentes confiables. Si el tema es una leyenda, un mito o una teoría, DEBES especificarlo claramente en el guion diciendo frases como 'según la leyenda...' o 'la teoría postula que...'. NO inventes eventos ni datos presentándolos como hechos."
 
 PROMPTS_POR_NICHO = {
@@ -85,10 +82,6 @@ PROMPTS_POR_NICHO = {
     "politica": f"Redacta una narración seria y crítica sobre un tema político actual, usando un tono imparcial pero analítico. Cita hechos, estadísticas y consecuencias verificables. {REGLA_DE_VERACIDAD}",
     "anime_manga": f"Crea una narración apasionada sobre un anime, manga o su creador. Basa la información en la trama oficial de la obra o en datos biográficos confirmados. {REGLA_DE_VERACIDAD}"
 }
-# =================================================================================
-# == FIN: DICCIONARIO DE PROMPTS ACTUALIZADO                                    ==
-# =================================================================================
-
 
 def convertir_numeros_a_texto(texto):
     if not texto:
@@ -231,7 +224,7 @@ def _generate_audio_task(job_id, script, voice_id):
 
 @app.route("/")
 def index():
-    return "Backend de IA para Videos v19.0 'Veracidad y CTA Global' - Estable"
+    return "Backend de IA para Videos v19.1 'Corrección de Sintaxis' - Estable"
 
 @app.route('/api/generate-initial-content', methods=['POST', 'OPTIONS'])
 def generate_initial_content():
@@ -267,13 +260,7 @@ def generate_initial_content():
         numero_de_escenas = duracion_a_escenas.get(str(data.get('duracionVideo', '50')), 4)
         
         prompt_final = ""
-        # =================================================================
-        # == INICIO: INSTRUCCIÓN DE CTA ACTUALIZADA Y HECHA GLOBAL       ==
-        # =================================================================
         cta_instruction = "La última escena DEBE ser exclusivamente un llamado a la acción (CTA) claro y directo. Pide al espectador que 'nos siga en todas nuestras redes sociales para no perderse más contenido como este'."
-        # =================================================================
-        # == FIN: INSTRUCCIÓN DE CTA ACTUALIZADA Y HECHA GLOBAL         ==
-        # =================================================================
 
         if data.get('tipoEntrada') == 'guion':
             prompt_template_guion = f"""
@@ -390,4 +377,8 @@ def generate_full_audio():
         return jsonify({"jobId": job_id})
 
     except Exception as e:
-        logging.error(f"Error fatal en la generación de audio: {e}", exc_info
+        logging.error(f"Error fatal en la generación de audio: {e}", exc_info=True)
+        return jsonify({"error": f"Error interno del servidor durante la generación de audio: {str(e)}"}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
